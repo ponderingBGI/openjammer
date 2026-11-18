@@ -1,0 +1,33 @@
+/* MultiplierNode — `out = in × n`.
+ *
+ * One number, big enough to read across a stage, in the mono voice because it
+ * is an exact value. Everything else on this card is a socket the NodeShell
+ * already drew. Written in W5-P6 (the body was eleven inline styles).
+ */
+
+.multiplier-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.multiplier-value {
+    display: flex;
+    justify-content: center;
+}
+
+/* The one number on the card, sized to be read rather than inspected. */
+.multiplier-value .oj-value-scrubber__value {
+    padding: 5px 12px;
+    font-size: var(--text-xl);
+}
+
+.multiplier-value .oj-value-scrubber__input {
+    padding: 5px 12px;
+    font-size: var(--text-xl);
+}
+
+.multiplier-driven {
+    justify-content: center;
+}

@@ -1,19 +1,19 @@
-/* Settings → Audio.
-   One emphasized "hero" surface for the live latency readout, everything else
-   flat on the panel ground and divided by hairlines — the same calm one-screen
-   language as the Updates tab. Tokens only; the latency number is the mono face
-   (Mono-Means-Exact), never Courier or a rainbow of literal colors. */
+/*
+ * Settings -> Audio.
+ *
+ * The tab's layout comes from the shared `.oj-set-*` vocabulary in
+ * SettingsPanel.css. Only what is genuinely audio-specific lives here: the
+ * latency hero (the one lifted surface on the tab), the Advanced disclosure and
+ * the mono breakdown table. Tokens only; the latency number is the mono face
+ * (Mono-Means-Exact).
+ */
 
 .oj-aud {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    animation: oj-aud-fade var(--transition-normal) ease-out;
+    animation: oj-aud-fade var(--motion-fast);
 }
 
-/* ── Latency hero (the one lifted surface) ── */
+/* ── Latency hero ──────────────────────────────────────────────────────── */
+
 .oj-aud-hero {
     display: flex;
     align-items: center;
@@ -25,35 +25,43 @@
 .oj-aud-hero-main {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     flex: 1 1 auto;
     min-width: 0;
 }
 
 .oj-aud-hero-state {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--space-sm);
     flex-wrap: wrap;
 }
 
+/* The dot sits on the type baseline of the number beside it. */
+.oj-aud-hero-state .oj-status-dot {
+    align-self: center;
+}
+
 .oj-aud-ms {
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
 }
 
 .oj-aud-ms-num {
     font-family: var(--font-mono);
-    font-size: var(--text-xl);
+    font-size: var(--text-2xl);
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
     color: var(--text-primary);
 }
 
 .oj-aud-verdict {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-lg);
     font-weight: 600;
-    line-height: 1.1;
+    line-height: 1.2;
     color: var(--text-primary);
 }
 
@@ -64,12 +72,8 @@
     flex-wrap: wrap;
 }
 
-.oj-aud-hero-hint {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-}
+/* ── Tips list inside a Callout ────────────────────────────────────────── */
 
-/* ── Callouts (bluetooth / tips) reuse oj-ui Callout; keep tip lists tidy ── */
 .oj-aud-tips {
     margin: 0;
     padding-left: 1.1em;
@@ -80,103 +84,80 @@
 
 .oj-aud-tips li {
     font-size: var(--text-sm);
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
-/* ── Flat control group, divided by a hairline ── */
-.oj-aud-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border-subtle);
-}
-
-.oj-aud-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-}
-
-.oj-aud-row-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1 1 240px;
-    min-width: 0;
-}
-
-.oj-aud-row-label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-md);
-    font-weight: 600;
+.oj-aud-tips strong {
     color: var(--text-primary);
 }
 
-.oj-aud-row-desc {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.4;
-    max-width: 60ch;
+/* ── Controls ──────────────────────────────────────────────────────────── */
+
+.oj-aud-device {
+    min-width: 220px;
 }
 
-.oj-aud-control {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
+.oj-aud-slider {
+    min-width: 200px;
 }
 
-/* The low-latency bolt rides beside the selected pro device (Signal-Not-Brand:
-   it sits with a name, not on a surface). */
-.oj-aud-bolt {
-    color: var(--accent-success);
-    flex-shrink: 0;
+.oj-aud-slider .oj-slider {
+    width: 140px;
 }
 
-.oj-aud-low-label {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
+.oj-aud-slider .oj-set-value {
+    min-width: 4ch;
+    text-align: right;
 }
 
-/* ── Advanced disclosure — engineer depth on demand ── */
+/* ── Advanced disclosure ───────────────────────────────────────────────── */
+
 .oj-aud-advanced {
+    padding-top: var(--space-lg);
     border-top: 1px solid var(--border-subtle);
-    padding-top: var(--space-sm);
 }
 
 .oj-aud-advanced > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    width: fit-content;
+    padding: 4px 8px 4px 0;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     user-select: none;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     font-weight: 600;
     color: var(--text-secondary);
-    padding: var(--space-xs) 0;
-    transition: color var(--transition-fast);
+    transition: color var(--motion-fast);
 }
 
 .oj-aud-advanced > summary:hover {
     color: var(--text-primary);
 }
 
+.oj-aud-advanced > summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
 .oj-aud-advanced-body {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
-    padding-top: var(--space-sm);
+    padding-top: var(--space-md);
 }
 
-/* Numeric breakdown — the detail, set in mono, on a quiet inset. */
+/* ── Numeric breakdown — the detail, on a quiet inset ──────────────────── */
+
 .oj-aud-breakdown {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    padding: var(--space-sm) var(--space-md);
     display: flex;
     flex-direction: column;
+    padding: var(--space-xs) var(--space-md);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
 }
 
 .oj-aud-bd-row {
@@ -184,7 +165,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-md);
-    padding: 4px 0;
+    padding: 6px 0;
 }
 
 .oj-aud-bd-row + .oj-aud-bd-row {
@@ -192,35 +173,22 @@
 }
 
 .oj-aud-bd-label {
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-secondary);
 }
 
-.oj-aud-bd-val {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-}
-
 .oj-aud-bd-total .oj-aud-bd-label,
-.oj-aud-bd-total .oj-aud-bd-val {
+.oj-aud-bd-total .oj-set-value {
     font-weight: 700;
     color: var(--text-primary);
 }
 
-/* ── Apply (the one controlled restart) + quiet footer link ── */
+/* ── The one controlled restart ────────────────────────────────────────── */
+
 .oj-aud-apply {
     width: 100%;
-    display: inline-flex;
-    align-items: center;
     justify-content: center;
-    gap: var(--space-xs);
-}
-
-.oj-aud-foot {
-    display: flex;
-    justify-content: center;
-    padding-top: var(--space-xs);
 }
 
 @keyframes oj-aud-fade {
@@ -229,11 +197,5 @@
     }
     to {
         opacity: 1;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .oj-aud {
-        animation: none;
     }
 }

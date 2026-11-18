@@ -3,7 +3,7 @@
 # OpenJammer oj-ui Master Migration Plan
 **Lead Design-System Architect — ground-up rebuild, zero legacy, no parallel paths**
 
-This plan extracts every reusable UI element into `@openjammer/oj-ui` as theme-agnostic, presentational, prop-driven components, and rewires the app to consume them while deleting every twin. It honors the covenant: **minimal core, infinite edges; every line used; migrate fully, remove legacy; the audio path is sacred.** It honors DESIGN.md's named rules (Hard-Shadow, Press-Is-Physical, No-Surprise, Port-Color-Is-Meaning, Signal-Not-Brand, Caveat-Is-the-Voice, Mono-Means-Exact).
+This plan extracts every reusable UI element into `@openjammer/oj-ui` as theme-agnostic, presentational, prop-driven components, and rewires the app to consume them while deleting every twin. It honors the covenant: **minimal core, infinite edges; every line used; migrate fully, remove legacy; the audio path is sacred.** It honors the shipped UI rules (Hard-Shadow, Press-Is-Physical, No-Surprise, Port-Color-Is-Meaning, Signal-Not-Brand, Outfit as the UI face, Mono-Means-Exact).
 
 The non-negotiable invariant for every increment: **GREEN (typecheck + lint + test + build) and a VISUAL NO-OP** — today's look is preserved exactly, captured as the `sketchbook` theme, until the designer's new default theme lands in Phases 4–6.
 
@@ -78,7 +78,7 @@ The non-negotiable invariant for every increment: **GREEN (typecheck + lint + te
 |---|---|---|
 | **PortRow** | NodeWrapper input/output map bodies, schematic `.port-row*`, Keyboard/MIDI/MiniLab3/Container/Input/OutputPanel port lists | `label: ReactNode`, `side: 'input'\|'output'`, port props (`kind`/`direction`/`connected` + `data-*` + handlers via `...rest`), `editableLabel?` slot, `placeholder?`, `hideLabel?`. Composes `Port`. |
 | **NodeFrame** | NodeWrapper absolute-positioned `.node`/`.schematic-node` outer container | `position: {x,y}`, `selected`, `dragging`, `agentPending`, `className`, `children`. Positioning wrapper around (but distinct from) `NodeShell` chrome. |
-| **EditableLabel** | CanvasIO/Container/MIDI/Input/OutputPanel inline rename | `value`, `editing` (controlled) **or** `defaultEditing`, `placeholder?`, `align?`, `onCommit`, `onCancel`. Caveat span ↔ `Input`. |
+| **EditableLabel** | CanvasIO/Container/MIDI/Input/OutputPanel inline rename | `value`, `editing` (controlled) **or** `defaultEditing`, `placeholder?`, `align?`, `onCommit`, `onCancel`. Outfit span ↔ `Input`. |
 | **ValueScrubber** | `ScrollableRowValue`/`ScrollableControl`/`ScrollableValue`/`EditableValue` + Looper inline duration (4–5 copies) | `value`, `display` (pre-formatted), `label?`, `editable?`, `disabled?`, `title?`, `onChange`, `onCommit`. Span ↔ `Input`. **No scroll-capture import** — the wheel hook stays app-side (see §2). |
 | **Cable** | `ConnectionPath` + `renderTempConnection()` (duplicated bezier math) | `start`, `end`, `kind`, `selected?`, `bundled?`, `bundleCount?`, `signalLevel`, `temp?`, `onSelect?`. Owns path-string math. **Must keep the existing memo comparator** (skip re-render on <1% signal change). |
 | **Waveform** | Looper/Sampler/Microphone SVG polyline | `data: number[]`, `playhead?`, `recording?`, `showCenterLine?`. Pure SVG from props. |
@@ -213,3 +213,75 @@ The migration above is a **visual no-op on the `sketchbook` theme**. The followi
 ---
 
 **Files of record:** plan grounds in `/home/wsl/projects/openjammer/DESIGN.md`, `/home/wsl/projects/openjammer/agents.md`, existing primitives in `/home/wsl/projects/openjammer/packages/oj-ui/src/components/` (Button, Input, Field, Select, Port, NodeShell) and tokens in `/home/wsl/projects/openjammer/packages/oj-tokens/`. The load-bearing contracts that must not break: the DOM `data-node-id`/`data-port-id`/`data-port-type` port-lookup used by NodeCanvas connection math; the cmdk `Command.Input` keyboard nav; the rAF signal-level memo comparator on the live canvas; and undo/redo reversibility of every graph verb.
+
+---
+
+## 7. New DNA status (appended 2026-08-29 — history above is unchanged)
+
+The plan above described a **visual no-op** migration onto the `sketchbook` theme, with
+Phases 4–6 deferred until a designer delivered a new default theme. That designer handoff
+arrived, and the *New DNA* redesign executed it. This section records what actually
+happened; nothing above has been rewritten.
+
+### Phase 4 — new default theme: **DONE, and larger than "values-only"**
+
+- The three sketchbook themes (`cream`, `cyberpunk`, `midnight`) were **retired**, not
+  re-valued. Exactly two ship: **`light` (default)** and **`dark`**.
+- Every custom-property **name** was kept and every **value** replaced (`--sketch-*`,
+  `--shadow-node/menu/sketch`, `--border-sketch*`, `--bg-canvas-alt`, the directional
+  port-colour tokens and `--font-sketch` are gone; the sweep for them greps clean).
+- New semantic roles were added because the language needed them: `--border-control`, the
+  five `*-ink` text partners, the four depth roles (`--shadow-raised` / `-overlay` /
+  `-inset` / `-pressed`), `--focus-ring`, `--overlay-scrim`.
+- Shipping totals: **37 primitive tokens + 53 semantic tokens per theme**, key sets
+  identical across themes, and no key contains a digit — both asserted by
+  `src/components/Arrangement/__tests__/contrast.test.ts`, which also enforces the WCAG
+  floors directly off the DTCG files.
+- **Fonts:** Caveat *and* Inter were both retired. `--font-sans` is now self-hosted
+  **Outfit** (400/500/600/700, latin woff2, OFL notice added); `--font-sketch` is deleted;
+  JetBrains Mono is unchanged. The two Google-Fonts service-worker rules are gone — a
+  stage cannot count on Wi-Fi.
+
+The §5 gate suite ran per increment as specified, with one intended change: item 2's
+**"visual diff must be ~0"** was retired at the token swap, because that is exactly the
+commit where the diff is supposed to be total.
+
+### Phase 6 — new components: **DONE**
+
+Three primitives had no counterpart in the old app and were added to `oj-ui`:
+**`Knob`** (52px dial, `role="slider"` with keyboard stepping, linear or log taper),
+**`Meter`** (six bars written per-frame through `--oj-meter-signal`, never React state),
+and **`TransportPill`** (the one floating transport shared by canvas, arrangement and
+piano roll). The library is now **44 folders → 60 exported React components**.
+
+Construction changed for several existing primitives in ways a value swap could not
+express — flat inset `Button` (no border, no shadow), `Port` as a recessed socket well
+**inside** the node body, `Chip` with no dot glyph, `Callout`/`Banner` with no left accent
+bar, 1px hairlines replacing 2px ink, soft layered shadows replacing hard offsets.
+
+### Phase 5 — Figma + Code Connect: **partially superseded**
+
+53 Code Connect mappings across 37 `.figma.tsx` files remain committed and valid. Still
+open: the Figma variables and masters were seeded from the *sketchbook* tokens and need a
+Tokens Studio re-pull plus a rebuild of the components whose construction changed; and
+seven folders (`Knob`, `Meter`, `TransportPill`, `ParamRow`, `LaneButton`, `TimeRuler`,
+`WaveformCanvas`) have no mapping yet. See
+[design-figma-handoff.md](design-figma-handoff.md).
+
+### The prohibition in §6 is now spent
+
+> *"Do not invent the universal-violet rainbow treatment, new elevation values, or any
+> net-new visual decision ahead of the designer."*
+
+That guard did its job — Phase 0 captured the old look without polluting it. The designer
+has since delivered, the handoff is implemented, and the authority it was protecting has
+moved: **[DESIGN.md](../DESIGN.md) is now the source of truth** for the visual language,
+`packages/oj-tokens` for the values, and `packages/oj-ui` for the components. The
+universal port's rainbow gradient was **retired**, not implemented — it is a flat violet.
+
+### Where the record lives
+
+Wave plan, decisions D1–D16, the "scope = everything" inventory and the follow-ups:
+`plans/redesign-new-dna/MASTER-PLAN.md`. The per-lane reports and gate reviews sit beside
+it, and the completeness matrix — every surface, node, panel and component with its
+light/dark screenshots — is `plans/redesign-new-dna/COVERAGE.md`.

@@ -8,36 +8,48 @@
  * behind this dialog is whatever the graph store hydrated from its own `persist`.
  * So "Back to my work" simply keeps that canvas (a dismiss, not a disk load), and
  * quarantined suspects stay preserved on disk (never deleted) so the explicit
- * "Reload last saved version" remains available when one exists. Styling reuses
- * the welcome-screen classes so there is no second full-screen vocabulary.
+ * "Reload last saved version" remains available when one exists.
+ *
+ * It wears the same New DNA card language as the first run — the two moments a
+ * player ever sees a full-screen OpenJammer should feel like the same product,
+ * not two different eras of it.
  */
 
+import { useEffect, useRef } from 'react';
 import { useCrashRecovery } from '../../persistence/recovery/useCrashRecovery';
+import './SafeModeScreen.css';
+import { requestNewProject } from '../Shell/newProjectDialog';
 
 type SafeModeApi = ReturnType<typeof useCrashRecovery>;
 
+const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
 export function SafeModeScreen({ api }: { api: SafeModeApi }) {
     const { safeMode } = api;
+    const cardRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!safeMode) return;
+        cardRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    }, [safeMode]);
+
     if (!safeMode) return null;
 
     const canRecover = safeMode.quarantinedId !== null;
 
     return (
         <div
-            className="oj-welcome"
+            className="oj-fullscreen"
             role="dialog"
             aria-modal="true"
             aria-labelledby="oj-safemode-title"
             onKeyDown={(e) => {
-                // Keep Tab inside the dialog (aria-modal is asserted). Mirrors the
-                // welcome screen's loop; focusables span the cards and footer links.
+                // A real trap over the live focusables, both directions.
                 if (e.key !== 'Tab') return;
-                const focusables = e.currentTarget.querySelectorAll<HTMLElement>(
-                    '.oj-welcome-option, .oj-welcome-link',
-                );
+                const focusables = [...(cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
                 if (focusables.length === 0) return;
-                const first = focusables[0];
-                const last = focusables[focusables.length - 1];
+                const first = focusables[0]!;
+                const last = focusables[focusables.length - 1]!;
                 if (e.shiftKey && document.activeElement === first) {
                     e.preventDefault();
                     last.focus();
@@ -47,83 +59,68 @@ export function SafeModeScreen({ api }: { api: SafeModeApi }) {
                 }
             }}
         >
-            <div className="oj-welcome-card">
-                <h1 id="oj-safemode-title" className="oj-welcome-title">
+            <div className="oj-fullscreen__card" ref={cardRef}>
+                <div className="oj-fullscreen__brand">
+                    <i aria-hidden="true" />
+                    OpenJammer
+                </div>
+
+                <h1 id="oj-safemode-title" className="oj-fullscreen__title">
                     Let&rsquo;s get you playing again
                 </h1>
-                <p className="oj-welcome-intro">
+                <p className="oj-fullscreen__intro">
                     OpenJammer restarted a few times just now, so it paused here instead of charging
                     back in. Your work is still on the canvas behind this &mdash; nothing was deleted.
                     Pick how you&rsquo;d like to continue.
                 </p>
 
                 {/* The decision: start clean, or keep the patch already on the canvas. */}
-                <button
-                    type="button"
-                    className="oj-welcome-option oj-welcome-option--primary"
-                    onClick={api.startFresh}
-                    autoFocus
-                >
-                    <span className="oj-welcome-option-main">
-                        <span className="oj-welcome-option-label">Start fresh</span>
-                        <span className="oj-welcome-option-sub">
-                            Clear the canvas and start clean. Your current work stays saved on disk.
-                        </span>
+                <button type="button" className="oj-fullscreen__option" onClick={api.startFresh}>
+                    <span className="oj-fullscreen__option-text">
+                        Start fresh
+                        <small>Clear the canvas and start clean. Your current work stays saved on disk.</small>
                     </span>
-                    <span className="oj-welcome-option-glyph" aria-hidden="true">
-                        &rarr;
-                    </span>
+                    <span className="oj-fullscreen__option-glyph" aria-hidden="true">&rarr;</span>
                 </button>
 
-                <button
-                    type="button"
-                    className="oj-welcome-option oj-welcome-option--secondary"
-                    onClick={api.dismiss}
-                >
-                    <span className="oj-welcome-option-main">
-                        <span className="oj-welcome-option-label">Back to my work</span>
-                        <span className="oj-welcome-option-sub">
+                <button type="button" className="oj-fullscreen__option" onClick={api.dismiss}>
+                    <span className="oj-fullscreen__option-text">
+                        Back to my work
+                        <small>
                             Keep the patch you can see behind this and pick up playing. If it crashes
                             again, you&rsquo;ll land right back here.
-                        </span>
+                        </small>
                     </span>
-                    <span className="oj-welcome-option-glyph" aria-hidden="true">
-                        &larr;
-                    </span>
+                    <span className="oj-fullscreen__option-glyph" aria-hidden="true">&larr;</span>
                 </button>
 
                 {/* Quiet utilities — escape hatches, not the main decision. */}
-                <div className="oj-welcome-footer">
+                <div className="oj-fullscreen__foot">
                     <button
                         type="button"
-                        className="oj-welcome-link"
+                        className="oj-fullscreen__link"
                         onClick={() => {
-                            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+                            // A direct call into the menu bar's dialog. This used
+                            // to dispatch `openjammer:new-project`, which nothing
+                            // anywhere listened for (UX-INV Q4).
+                            requestNewProject('new');
                             api.dismiss();
                         }}
                     >
                         Open a different project
                     </button>
-                    <span className="oj-welcome-footer-sep" aria-hidden="true">
-                        &middot;
-                    </span>
+                    <span className="oj-fullscreen__sep" aria-hidden="true">&middot;</span>
                     <button
                         type="button"
-                        className="oj-welcome-link"
+                        className="oj-fullscreen__link"
                         onClick={() => window.dispatchEvent(new CustomEvent('openjammer:report-issue'))}
                     >
                         Send a report
                     </button>
                     {canRecover && (
                         <>
-                            <span className="oj-welcome-footer-sep" aria-hidden="true">
-                                &middot;
-                            </span>
-                            <button
-                                type="button"
-                                className="oj-welcome-link"
-                                onClick={api.recoverAnyway}
-                            >
+                            <span className="oj-fullscreen__sep" aria-hidden="true">&middot;</span>
+                            <button type="button" className="oj-fullscreen__link" onClick={api.recoverAnyway}>
                                 Reload last saved version
                             </button>
                         </>

@@ -34,6 +34,15 @@ export interface KeybindingAction {
     /** Surface where the shortcut is active. Global shortcuts overlap every scope. */
     scope: Exclude<KeymapScope, 'text' | 'modal'>;
     surface?: SurfaceId;
+    /**
+     * Mutually-exclusive editing mode inside a surface. Two actions on the same
+     * surface whose modes are BOTH set and DIFFERENT can never be live at the
+     * same moment (the piano roll's step-entry keybed vs its tool letters are
+     * guarded on `stepEntry.trackId`), so they are not a conflict even when they
+     * share a combo. An action with no mode is ambient on its surface and
+     * conflicts with everything there.
+     */
+    mode?: string;
 }
 
 // ============================================================================
@@ -41,21 +50,8 @@ export interface KeybindingAction {
 // ============================================================================
 
 export const keybindingActions: KeybindingAction[] = [
-    // File actions
-    {
-        id: 'file.new',
-        label: 'New Workflow',
-        category: 'File',
-        defaultBinding: { key: 'n', ctrl: true },
-        scope: 'global',
-    },
-    {
-        id: 'file.import',
-        label: 'Import Workflow',
-        category: 'File',
-        defaultBinding: { key: 'o', ctrl: true },
-        scope: 'global',
-    },
+    // New/import remain menu-driven until their destructive/file-picker flows have
+    // real keymap consumers. Do not advertise shortcuts that silently do nothing.
     {
         id: 'file.save',
         label: 'Save Project',
@@ -99,21 +95,22 @@ export const keybindingActions: KeybindingAction[] = [
         id: 'view.zoomIn',
         label: 'Zoom In',
         category: 'View',
-        defaultBinding: { key: '=', ctrl: true },
+        // Alt is cancellable by Chromium; Ctrl/Cmd +/-/0 are reserved browser zoom.
+        defaultBinding: { key: '=', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.zoomOut',
         label: 'Zoom Out',
         category: 'View',
-        defaultBinding: { key: '-', ctrl: true },
+        defaultBinding: { key: '-', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.resetView',
         label: 'Reset View',
         category: 'View',
-        defaultBinding: { key: '0', ctrl: true },
+        defaultBinding: { key: '0', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
@@ -132,6 +129,8 @@ export const keybindingActions: KeybindingAction[] = [
         defaultBinding: { key: 'a' },
         scope: 'surface', surface: 'canvas',
     },
+    { id: 'canvas.selectAll', label: 'Select All Nodes', category: 'Canvas', defaultBinding: { key: 'a', ctrl: true }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.duplicate', label: 'Duplicate Nodes', category: 'Canvas', defaultBinding: { key: 'd', ctrl: true }, scope: 'surface', surface: 'canvas' },
     { id: 'view.toggleArrangement', label: 'Toggle Arrangement', category: 'View', defaultBinding: { key: 'Tab' }, scope: 'global' },
     { id: 'window.focusHost', label: 'Return to OpenJammer', category: 'View', defaultBinding: { key: 'F6' }, scope: 'global' },
     { id: 'commandBar.toggle', label: 'Open Command Bar', category: 'View', defaultBinding: { key: 'k', ctrl: true }, scope: 'global' },
@@ -181,6 +180,113 @@ export const keybindingActions: KeybindingAction[] = [
         surface: 'canvas',
     })),
     { id: 'note.controlSpace', label: 'Keyboard Control Signal', category: 'Note Input', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'canvas' },
+
+    // The rebuilt timeline's own actions (Waves 3-4). Every entry below is
+    // REGISTERED by an arrangement or piano-roll binding set at runtime; the
+    // catalogue exists so all of them are visible, rebindable and conflict-
+    // checked in Settings -> Keybindings instead of being invisible surface
+    // trivia. `keybindingsCatalogue.test.ts` fails if a registered id is missing.
+
+    // Arrangement - editing and navigation
+    { id: 'arrangement.enter', label: 'Open Selected Clip', category: 'Arrangement', defaultBinding: { key: 'e' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.exit', label: 'Leave Arrangement', category: 'Arrangement', defaultBinding: { key: 'q' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectAll', label: 'Select All Clips', category: 'Arrangement', defaultBinding: { key: 'a', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.muteClips', label: 'Mute Selected Clips', category: 'Arrangement', defaultBinding: { key: '0' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.insertTime', label: 'Insert Time', category: 'Arrangement', defaultBinding: { key: 'e', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.deleteTime', label: 'Delete Time', category: 'Arrangement', defaultBinding: { key: 'Backspace', ctrl: true, shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.moveTrackUp', label: 'Move Track Up', category: 'Arrangement', defaultBinding: { key: 'ArrowUp' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.moveTrackDown', label: 'Move Track Down', category: 'Arrangement', defaultBinding: { key: 'ArrowDown' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeBarLeft', label: 'Nudge Clips One Bar Left', category: 'Arrangement', defaultBinding: { key: 'ArrowLeft', alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeBarRight', label: 'Nudge Clips One Bar Right', category: 'Arrangement', defaultBinding: { key: 'ArrowRight', alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectSpatialLeft', label: 'Extend Clip Selection Left', category: 'Arrangement', defaultBinding: { key: 'ArrowLeft', ctrl: true, alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectSpatialRight', label: 'Extend Clip Selection Right', category: 'Arrangement', defaultBinding: { key: 'ArrowRight', ctrl: true, alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectSpatialUp', label: 'Extend Clip Selection Up', category: 'Arrangement', defaultBinding: { key: 'ArrowUp', ctrl: true, alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectSpatialDown', label: 'Extend Clip Selection Down', category: 'Arrangement', defaultBinding: { key: 'ArrowDown', ctrl: true, alt: true }, scope: 'surface', surface: 'arrangement' },
+
+    // Arrangement - transport, loop/punch and markers
+    { id: 'arrangement.playFromSelection', label: 'Play From Selection', category: 'Arrangement Transport', defaultBinding: { key: ' ', shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.loop', label: 'Loop the Selection', category: 'Arrangement Transport', defaultBinding: { key: 'l' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.loopIn', label: 'Set Loop In', category: 'Arrangement Transport', defaultBinding: { key: 'i' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.loopOut', label: 'Set Loop Out', category: 'Arrangement Transport', defaultBinding: { key: 'o' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.punch', label: 'Toggle Punch Recording', category: 'Arrangement Transport', defaultBinding: { key: 'p' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.metronome', label: 'Toggle Metronome', category: 'Arrangement Transport', defaultBinding: { key: 'm' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.addMarker', label: 'Add Marker', category: 'Arrangement Transport', defaultBinding: { key: 'm', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.markerPrevious', label: 'Previous Marker', category: 'Arrangement Transport', defaultBinding: { key: 'ArrowLeft', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.markerNext', label: 'Next Marker', category: 'Arrangement Transport', defaultBinding: { key: 'ArrowRight', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+
+    // Arrangement - the view: zoom, scroll and grid
+    { id: 'arrangement.zoomIn', label: 'Zoom In Timeline', category: 'Arrangement View', defaultBinding: { key: '=' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.zoomOut', label: 'Zoom Out Timeline', category: 'Arrangement View', defaultBinding: { key: '-' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.fitSong', label: 'Fit Song to Window', category: 'Arrangement View', defaultBinding: { key: '0', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.home', label: 'Go to Song Start', category: 'Arrangement View', defaultBinding: { key: 'Home' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.end', label: 'Go to Song End', category: 'Arrangement View', defaultBinding: { key: 'End' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.follow', label: 'Follow the Playhead', category: 'Arrangement View', defaultBinding: { key: 'f' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.snapToggle', label: 'Toggle Snap', category: 'Arrangement View', defaultBinding: { key: 'g', alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.gridCoarser', label: 'Coarser Grid', category: 'Arrangement View', defaultBinding: { key: '[' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.gridFiner', label: 'Finer Grid', category: 'Arrangement View', defaultBinding: { key: ']' }, scope: 'surface', surface: 'arrangement' },
+
+    // Arrangement - tools
+    { id: 'arrangement.tool.select', label: 'Select Tool', category: 'Arrangement Tools', defaultBinding: { key: 'v' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.tool.draw', label: 'Draw Tool', category: 'Arrangement Tools', defaultBinding: { key: 'b' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.tool.erase', label: 'Erase Tool', category: 'Arrangement Tools', defaultBinding: { key: 'x' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.tool.knife', label: 'Knife Tool', category: 'Arrangement Tools', defaultBinding: { key: 'k' }, scope: 'surface', surface: 'arrangement' },
+    // `arrangement.tool.time` was here. It armed a tool no code path read, had
+    // no button, and did nothing when pressed — so it is gone rather than
+    // rebound (U11 / HA-13; code-value #8).
+
+    // Piano roll - note editing
+    { id: 'pianoroll.transport', label: 'Play/Stop (Piano Roll)', category: 'Piano Roll', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+    { id: 'pianoroll.undo', label: 'Undo (Piano Roll)', category: 'Piano Roll', defaultBinding: { key: 'z', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.redo', label: 'Redo (Piano Roll)', category: 'Piano Roll', defaultBinding: { key: 'z', ctrl: true, shift: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.escape', label: 'Clear Note Selection', category: 'Piano Roll', defaultBinding: { key: 'Escape' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.exit', label: 'Close the Piano Roll', category: 'Piano Roll', defaultBinding: { key: 'q' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.selectAll', label: 'Select All Notes', category: 'Piano Roll', defaultBinding: { key: 'a', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.selectionUndo', label: 'Undo Note Selection', category: 'Piano Roll', defaultBinding: { key: 'z', ctrl: true, alt: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.selectionRedo', label: 'Redo Note Selection', category: 'Piano Roll', defaultBinding: { key: 'y', ctrl: true, alt: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.cut', label: 'Cut Notes', category: 'Piano Roll', defaultBinding: { key: 'x', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.copy', label: 'Copy Notes', category: 'Piano Roll', defaultBinding: { key: 'c', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.paste', label: 'Paste Notes', category: 'Piano Roll', defaultBinding: { key: 'v', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.delete', label: 'Delete Notes', category: 'Piano Roll', defaultBinding: { key: 'Delete' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.deleteBackspace', label: 'Delete Notes (Backspace)', category: 'Piano Roll', defaultBinding: { key: 'Backspace' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.duplicate', label: 'Duplicate Notes', category: 'Piano Roll', defaultBinding: { key: 'd', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.nudgeLeft', label: 'Nudge Notes Left', category: 'Piano Roll', defaultBinding: { key: 'ArrowLeft' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.nudgeRight', label: 'Nudge Notes Right', category: 'Piano Roll', defaultBinding: { key: 'ArrowRight' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.nudgeLeftFine', label: 'Fine Nudge Notes Left', category: 'Piano Roll', defaultBinding: { key: 'ArrowLeft', shift: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.nudgeRightFine', label: 'Fine Nudge Notes Right', category: 'Piano Roll', defaultBinding: { key: 'ArrowRight', shift: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.transposeUp', label: 'Transpose Notes Up', category: 'Piano Roll', defaultBinding: { key: 'ArrowUp' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.transposeDown', label: 'Transpose Notes Down', category: 'Piano Roll', defaultBinding: { key: 'ArrowDown' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.transposeOctaveUp', label: 'Transpose Notes Up an Octave', category: 'Piano Roll', defaultBinding: { key: 'ArrowUp', alt: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.transposeOctaveDown', label: 'Transpose Notes Down an Octave', category: 'Piano Roll', defaultBinding: { key: 'ArrowDown', alt: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.velocityUp', label: 'Raise Note Velocity', category: 'Piano Roll', defaultBinding: { key: 'ArrowUp', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.velocityDown', label: 'Lower Note Velocity', category: 'Piano Roll', defaultBinding: { key: 'ArrowDown', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.resizeShorter', label: 'Shorten Notes', category: 'Piano Roll', defaultBinding: { key: ',' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.resizeLonger', label: 'Lengthen Notes', category: 'Piano Roll', defaultBinding: { key: '.' }, scope: 'surface', surface: 'pianoroll' },
+    { id: 'pianoroll.quantize', label: 'Quantize Notes', category: 'Piano Roll', defaultBinding: { key: 'q', ctrl: true }, scope: 'surface', surface: 'pianoroll' },
+
+    // Piano roll - tools (live only while step entry is OFF)
+    { id: 'pianoroll.tool.select', label: 'Select Tool (Piano Roll)', category: 'Piano Roll Tools', defaultBinding: { key: 'v' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+    { id: 'pianoroll.tool.draw', label: 'Draw Tool (Piano Roll)', category: 'Piano Roll Tools', defaultBinding: { key: 'b' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+    { id: 'pianoroll.tool.erase', label: 'Erase Tool (Piano Roll)', category: 'Piano Roll Tools', defaultBinding: { key: 'x' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+    { id: 'pianoroll.tool.knife', label: 'Knife Tool (Piano Roll)', category: 'Piano Roll Tools', defaultBinding: { key: 'k' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+    { id: 'pianoroll.tool.step', label: 'Step Entry Tool', category: 'Piano Roll Tools', defaultBinding: { key: 't' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },
+
+    // Piano roll - step entry keybed (live only while step entry is ON)
+    { id: 'pianoroll.step.a', label: 'Step Entry C (A)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'a' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.w', label: 'Step Entry C# (W)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'w' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.s', label: 'Step Entry D (S)', category: 'Piano Roll Step Entry', defaultBinding: { key: 's' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.e', label: 'Step Entry D# (E)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'e' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.d', label: 'Step Entry E (D)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'd' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.f', label: 'Step Entry F (F)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'f' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.t', label: 'Step Entry F# (T)', category: 'Piano Roll Step Entry', defaultBinding: { key: 't' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.g', label: 'Step Entry G (G)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'g' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.y', label: 'Step Entry G# (Y)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'y' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.h', label: 'Step Entry A (H)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'h' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.u', label: 'Step Entry A# (U)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'u' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.j', label: 'Step Entry B (J)', category: 'Piano Roll Step Entry', defaultBinding: { key: 'j' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.advance', label: 'Step Entry: Rest and Advance', category: 'Piano Roll Step Entry', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.retreat', label: 'Step Entry: Step Back', category: 'Piano Roll Step Entry', defaultBinding: { key: 'Backspace' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.octaveDown', label: 'Step Entry: Octave Down', category: 'Piano Roll Step Entry', defaultBinding: { key: 'z' }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
+    { id: 'pianoroll.step.octaveUp', label: 'Step Entry: Octave Up', category: 'Piano Roll Step Entry', defaultBinding: { key: 'z', shift: true }, scope: 'surface', surface: 'pianoroll', mode: 'step' },
 ];
 
 // ============================================================================
@@ -200,6 +306,10 @@ export function keyComboToString(combo: KeyCombo): string {
     if (combo.key === ' ') keyDisplay = 'Space';
     else if (combo.key === 'Delete') keyDisplay = 'Del';
     else if (combo.key === 'Backspace') keyDisplay = 'Backspace';
+    else if (combo.key === 'Escape') keyDisplay = 'Esc';
+    // Arrow keys are spelled out rather than drawn as glyphs: a keycap is read
+    // aloud as often as it is looked at, and "Left" survives a screen reader.
+    else if (combo.key.startsWith('Arrow')) keyDisplay = combo.key.slice('Arrow'.length);
     else if (combo.key.length === 1) keyDisplay = combo.key.toUpperCase();
 
     parts.push(keyDisplay);
@@ -217,8 +327,17 @@ export function matchesKeyCombo(e: KeyboardEvent, combo: KeyCombo): boolean {
     if (Boolean(combo.alt) !== e.altKey) return false;
 
     // Check main key (case-insensitive for letters)
-    const eventKey = e.key.toLowerCase();
     const comboKey = combo.key.toLowerCase();
+
+    // Option modifies the produced character on macOS (for example Alt+= is ≠),
+    // while the physical key code remains stable across keyboard layouts.
+    if (combo.alt) {
+        const codeForKey: Record<string, string> = { '=': 'Equal', '-': 'Minus', '0': 'Digit0' };
+        const expectedCode = codeForKey[comboKey];
+        if (expectedCode) return e.code === expectedCode;
+    }
+
+    const eventKey = e.key.toLowerCase();
 
     return eventKey === comboKey;
 }
@@ -405,6 +524,8 @@ export const useKeybindingsStore = create<KeybindingsStore>()(
                     if (action.id === actionId) continue;
 
                     const actionScope = action.scope ?? 'global';
+                    // Two different modes on one surface are never live together.
+                    if (target?.mode && action.mode && target.mode !== action.mode) continue;
                     const sameSurface = target?.surface === action.surface;
                     const scopesOverlap = targetScope === 'global' || actionScope === 'global' ||
                         (targetScope === actionScope && (targetScope !== 'surface' || sameSurface));

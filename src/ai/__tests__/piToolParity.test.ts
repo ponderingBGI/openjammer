@@ -39,6 +39,14 @@ describe('Pi extension ↔ host tool parity', () => {
         expect(missing).toEqual([]);
     });
 
+    it('advertises the empty-lane draw gesture as the reversible createClip op', () => {
+        expect(EDIT_OPS).toContain('createClip');
+        expect(src).toContain("Type.Literal('createClip')");
+        for (const field of ['trackId', 'startTick', 'lengthTick']) {
+            expect(src, `createClip schema is missing ${field}`).toContain(`${field}: Type.`);
+        }
+    });
+
     it('declares the BC-30..37 note-op payloads, not only their names', () => {
         for (const field of ['clipId', 'note', 'noteIds', 'semitones', 'targets', 'grid', 'strength', 'swing', 'threshold']) {
             expect(src, `edit_timeline schema is missing note-op field ${field}`).toContain(`${field}: Type.`);

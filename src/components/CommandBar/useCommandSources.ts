@@ -24,9 +24,9 @@
  */
 
 import { useEffect } from "react";
-import { nodeDefinitions, menuCategories } from "../../engine/registry";
+import { nodeDefinitions, menuCategories, getNodeDefinition } from "../../engine/registry";
 import type { NodeCategory, NodeType, Position } from "../../engine/types";
-import { useGraphStore } from "../../store/graphStore";
+import { getNodeDimensions, useGraphStore } from "../../store/graphStore";
 import { useCanvasStore } from "../../store/canvasStore";
 import { useCanvasNavigationStore } from "../../store/canvasNavigationStore";
 import { registerAll } from "../../store/commandRegistry";
@@ -37,6 +37,8 @@ import { getInvoke } from "../../ai/tauri";
 import { useEditingContextStore } from "../../store/editingContextStore";
 import { applyPianoRollQuantize } from "../PianoRoll";
 import { useUiViewStore } from "../../store/uiViewStore";
+import { freeSpawnPoint, measureRenderedCards, spawnCardSize, type SpawnBounds, type SpawnBox } from "../../utils/spawnPlacement";
+import { requestNewProject } from "../Shell/newProjectDialog";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -48,13 +50,76 @@ const CATEGORY_LABEL: Record<NodeCategory, string> = {
   utility: "Utility",
 };
 
-/** The canvas-space centre of the current viewport (the palette's spawn point). */
-function viewportCenter(): Position {
+/**
+ * The palette's spawn point: the canvas position that puts the CARD's centre at
+ * the viewport's centre.
+ *
+ * `addNode` takes a top-LEFT, and this used to return the viewport centre
+ * unadjusted — so the card hung down and to the right of the middle, and anything
+ * taller than about 400px was already partly off the bottom edge before a single
+ * cascade step was taken. Half the card's size is the whole correction, and it is
+ * also what makes "centre of the screen" mean what a player would expect.
+ */
+function viewportCenter(card: { width: number; height: number }): Position {
+  const rect = useCanvasStore.getState().canvasRect;
   const screenCenter: Position = {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
   };
-  return useCanvasStore.getState().screenToCanvas(screenCenter);
+  const centre = useCanvasStore.getState().screenToCanvas(screenCenter);
+  return { x: centre.x - card.width / 2, y: centre.y - card.height / 2 };
+}
+
+/**
+ * The REAL, rendered size of every card currently on the canvas, in canvas px,
+ * keyed by node id.
+ *
+ * The rule itself — and the argument for measuring the surface instead of
+ * trusting the registry's `dimensions` — lives with the placement rule in
+ * `utils/spawnPlacement.ts`. This is the app-side wiring: the zoom and the node
+ * type lookup come from the stores, which that module deliberately does not know
+ * about.
+ */
+function measuredCards() {
+  return measureRenderedCards(
+    useCanvasStore.getState().zoom,
+    (nodeId) => useGraphStore.getState().nodes.get(nodeId)?.type,
+  );
+}
+
+/**
+ * The visible canvas, in CANVAS space — the rectangle a newly added card has to
+ * stay inside to be seen.
+ *
+ * A card that lands off-screen is the same failure as a card that lands under
+ * another one: the gesture promised a card appearing and the player got nothing.
+ * `viewportCenter()` puts the card's top-LEFT at the centre, so a tall card
+ * already overflows before any cascade, and the cascade then pushed it further.
+ * Returns `undefined` before the canvas has been measured, in which case the
+ * placement rule simply skips the containment test.
+ */
+function visibleCanvasBounds(): SpawnBounds | undefined {
+  const canvas = useCanvasStore.getState();
+  const rect = canvas.canvasRect;
+  if (!rect.width || !rect.height) return undefined;
+  /*
+   * INTERSECT the canvas element with the window, do not just convert it.
+   *
+   * The canvas is a full-height 1440x900 box that starts BELOW the topbar
+   * (measured: `top: 46`), so its own bottom 46px are off the screen. Trusting
+   * the element's rect therefore told the placement rule that a strip it cannot
+   * see was fair game, and every card that landed against that edge hung off the
+   * real screen by the height of the chrome. "Visible" has to mean visible to
+   * the player, not merely inside the scroller.
+   */
+  const left = Math.max(rect.left, 0);
+  const top = Math.max(rect.top, 0);
+  const right = Math.min(rect.left + rect.width, window.innerWidth);
+  const bottom = Math.min(rect.top + rect.height, window.innerHeight);
+  if (right <= left || bottom <= top) return undefined;
+  const topLeft = canvas.screenToCanvas({ x: left, y: top });
+  const bottomRight = canvas.screenToCanvas({ x: right, y: bottom });
+  return { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y };
 }
 
 /** The canvas level the user is currently viewing (the default add parent). */
@@ -67,17 +132,59 @@ function currentParentId(): string | null {
  * (canvas coords -> addNode with the active parent) without importing anything
  * from the read-only Nodes lane.
  *
- * - Palette: `ctx.point` is undefined → spawn at the viewport centre, inside the
- *   level the user is viewing.
- * - Context menu (M4): `ctx.point` is the clicked canvas point; if the user
- *   right-clicked a node, `ctx.node` is the spawn parent.
+ * - Palette: `ctx.point` is undefined → spawn at the viewport centre.
+ * - Context menu (M4): `ctx.point` is the clicked canvas point.
+ *
+ * Either way the spawn PARENT is the level the player is currently looking at,
+ * and nothing else. It used to be `ctx.node?.id ?? currentParentId()`, which
+ * reads plausibly and is wrong on both surfaces: `buildPaletteCtx` sets
+ * `ctx.node` to the SINGLE SELECTED node, which means "what this command is
+ * about", not "where to put the next card". The menu never set it at all (right-
+ * click on a card was suppressed until HA-26), so the branch had no correct
+ * caller — and the moment an add started selecting what it made (U12), every
+ * second palette add vanished INSIDE the first. Measured: `Add Looper` then
+ * `Add Library` produced one visible card and one card nested a level down.
+ *
+ * Either way the point is only the STARTING wish: {@link freeSpawnPoint}
+ * cascades off any sibling already sitting there. The palette had no point of
+ * its own, so three adds in a row produced three cards on one pixel and the
+ * player watched two of them land invisibly.
  *
  * RE-READs the stores at call time (mutation discipline) — never the snapshot.
  */
 function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
-  const canvasPos = ctx?.point ?? viewportCenter();
-  const parentId = ctx?.node?.id ?? currentParentId();
-  useGraphStore.getState().addNode(type, canvasPos, parentId);
+  const parentId = currentParentId();
+  // Real RECTANGLES, not origins: a 380px-tall Library and a 90px Multiplier are
+  // not the same obstacle, and two big cards 30px apart cover each other almost
+  // completely while their origins look comfortably separated.
+  const measured = measuredCards();
+  const siblings: SpawnBox[] = [];
+  for (const node of useGraphStore.getState().nodes.values()) {
+    if ((node.parentId ?? null) !== parentId) continue;
+    // The card's REAL footprint where it is on screen; its declared one only as a
+    // fallback. Reserving the largest card's size for every sibling would
+    // artificially exhaust the canvas and push the run off-screen anyway.
+    siblings.push({ position: node.position, ...(measured.byId.get(node.id) ?? getNodeDimensions(node)) });
+  }
+  const card = spawnCardSize(type, getNodeDefinition(type).dimensions);
+  const canvasPos = freeSpawnPoint(ctx?.point ?? viewportCenter(card), siblings, card, visibleCanvasBounds());
+  const id = useGraphStore.getState().addNode(type, canvasPos, parentId);
+  /*
+   * U12 / HA-07 — SELECT what you just made.
+   *
+   * `addNode`'s returned id was discarded here, and the measured consequence is
+   * that a palette add produced no confirmation of any kind: `selected: 0` after
+   * every one of seven probes. On a busy canvas — or after a cascade step moved
+   * the card away from the point the player was looking at — there was no way to
+   * tell WHICH card was new. Selecting it is the visible half of the answer (the
+   * live region is the spoken half); it costs nothing, it is what a mouse add
+   * would have done, and the ring is already drawn.
+   *
+   * Not part of the same history entry on purpose: selection is view state, and
+   * an undo that also had to restore a selection is a bigger promise than this
+   * needs to make.
+   */
+  useGraphStore.getState().selectNode(id);
 }
 
 /**
@@ -275,8 +382,9 @@ function buildAppCommands(): Array<Command | Action> {
       title: "New Project",
       group: "App",
       keywords: ["new", "project", "create", "file"],
-      run: () =>
-        window.dispatchEvent(new CustomEvent("openjammer:new-project")),
+      // A direct call, not an event: `openjammer:new-project` had no listener
+      // anywhere in the app, so this entry did nothing at all (UX-INV Q4).
+      run: () => requestNewProject("new"),
     },
     {
       // D6 (M7): the Ctrl+K-superset entry into the AuthChooser. Palette-only

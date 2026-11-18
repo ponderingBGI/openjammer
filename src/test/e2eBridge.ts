@@ -9,6 +9,7 @@ import type { AgentEvent, AgentTask } from '../ai';
 import { useAgentSessionStore } from '../store/agentSessionStore';
 import { useCollabStore } from '../store/collabStore';
 import { reportPluginFault, type PluginFaultKind } from '../store/pluginFaultStore';
+import { useAudioStore } from '../store/audioStore';
 
 type FixtureName = 'denseEdit' | 'firstLight' | 'hundredTracks' | 'pathological';
 
@@ -32,6 +33,8 @@ interface E2EBridge {
     setAgentScript(script: AgentEvent[] | ((task: AgentTask) => AgentEvent[])): Promise<void>;
     sendAgent(prompt: string): Promise<void>;
     agentSession(): Promise<{ messages: unknown[]; phase: string }>;
+    noteEvents(): Array<{ type: 'on' | 'off'; keyboardId: string; row: number; keyIndex: number }>;
+    resetNoteEvents(): void;
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -40,6 +43,20 @@ const e2eIceServers: RTCIceServer[] = e2eStunUrl ? [{ urls: e2eStunUrl }] : [];
 
 export function installE2EBridge(): void {
     if (typeof window === 'undefined' || !navigator.webdriver) return;
+    const noteEvents: Array<{ type: 'on' | 'off'; keyboardId: string; row: number; keyIndex: number }> = [];
+    const audio = useAudioStore.getState();
+    const emitKeyboardSignal = audio.emitKeyboardSignal;
+    const releaseKeyboardSignal = audio.releaseKeyboardSignal;
+    useAudioStore.setState({
+        emitKeyboardSignal: (keyboardId, row, keyIndex) => {
+            noteEvents.push({ type: 'on', keyboardId, row, keyIndex });
+            emitKeyboardSignal(keyboardId, row, keyIndex);
+        },
+        releaseKeyboardSignal: (keyboardId, row, keyIndex) => {
+            noteEvents.push({ type: 'off', keyboardId, row, keyIndex });
+            releaseKeyboardSignal(keyboardId, row, keyIndex);
+        },
+    });
     const fixtures = { denseEdit: buildDenseEdit, firstLight: buildFirstLight, hundredTracks: buildHundredTracks, pathological: buildPathological };
     const bridge: E2EBridge = {
         setFixture(name) {
@@ -106,6 +123,8 @@ export function installE2EBridge(): void {
             const session = useAgentSessionStore.getState();
             return clone({ messages: session.messages, phase: session.phase });
         },
+        noteEvents: () => clone(noteEvents),
+        resetNoteEvents: () => { noteEvents.length = 0; },
     };
     (window as unknown as { __openjammerE2E: E2EBridge }).__openjammerE2E = bridge;
 }

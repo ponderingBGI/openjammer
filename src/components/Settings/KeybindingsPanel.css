@@ -1,279 +1,255 @@
-/**
- * KeybindingsPanel.css - Keyboard shortcuts configuration UI
+/*
+ * Settings -> Keybindings.
+ *
+ * A dense but calm table: a sticky-feeling toolbar (search + surface filter), a
+ * meta line, then one section per category. Rows are oj-ui ListRows, keys are
+ * oj-ui Kbd caps, the conflict and the reset-everything confirm are oj-ui
+ * Callouts INSIDE the flow — no native dialog, no second overlay.
+ *
+ * Only two things here are bespoke: the capture box (there is no oj-ui part for
+ * "hold some keys and I'll read them") and the fixed-width revert slot that
+ * stops rows from twitching when the revert button appears.
  */
 
 .keybindings-panel {
     display: flex;
     flex-direction: column;
     gap: var(--space-lg);
+    font-family: var(--font-sans);
 }
 
-.keybindings-header {
+/* ── Toolbar: find a shortcut, or narrow to one surface ─────────────────── */
+
+.keybindings-toolbar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.keybindings-search {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.keybindings-surface {
+    flex: 0 0 auto;
+}
+
+.keybindings-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
     padding-bottom: var(--space-md);
     border-bottom: 1px solid var(--border-subtle);
 }
 
+.keybindings-meta__right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
 .keybindings-description {
     margin: 0;
-    color: var(--text-muted);
     font-size: var(--text-sm);
-}
-
-.keybindings-reset-all {
-    padding: var(--space-xs) var(--space-md);
-    background: transparent;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
+    line-height: 1.45;
     color: var(--text-secondary);
-    cursor: pointer;
-    transition: all var(--transition-fast);
 }
 
-.keybindings-reset-all:hover:not(:disabled) {
-    border-color: var(--accent-danger);
-    color: var(--accent-danger);
+/* ── The reset-everything confirm (in-panel, never a native dialog) ─────── */
+
+.keybindings-confirm__body {
+    margin: 0 0 var(--space-sm);
 }
 
-.keybindings-reset-all:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Category */
-.keybindings-category {
+.keybindings-confirm__actions {
     display: flex;
-    flex-direction: column;
     gap: var(--space-sm);
+    flex-wrap: wrap;
 }
 
-.keybindings-category-title {
-    margin: 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-md);
-    font-weight: 600;
-    color: var(--text-primary);
-    padding-bottom: var(--space-xs);
-    border-bottom: 1px solid var(--border-subtle);
-}
+/* ── Category sections ─────────────────────────────────────────────────── */
 
-/* List */
-.keybindings-list {
+.keybindings-category {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
 }
 
-/* Row */
-.keybindings-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
-}
-
-.keybindings-row:hover {
-    background: var(--bg-canvas-alt);
-}
-
-.keybindings-row-editing {
-    background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
-    outline: 2px solid var(--accent-primary);
-}
-
-.keybindings-label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-}
-
-.keybindings-controls {
+.keybindings-category-head {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    flex-wrap: wrap;
+    padding-bottom: var(--space-xs);
 }
 
-/* Shortcut Button */
-.keybindings-shortcut {
-    min-width: 100px;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-node);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
+.keybindings-category-title {
+    margin: 0;
+    /* Uppercase micro-label: the mono voice, declared here. */
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    color: var(--text-secondary);
-    text-align: center;
-    cursor: pointer;
-    transition: all var(--transition-fast);
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
 
-.keybindings-shortcut:hover {
-    border-color: var(--accent-primary);
+.keybindings-surface-chip {
+    font-size: var(--text-sm);
+    padding: 2px 8px;
+}
+
+/* The List owns the row rhythm; it must not scroll on its own — the settings
+   pane is the one scroller so the whole catalogue reads as a single document. */
+.keybindings-list {
+    overflow: visible;
+    gap: 0;
+}
+
+.keybindings-entry {
+    display: flex;
+    flex-direction: column;
+}
+
+.keybindings-row {
+    /* A row is not a target you pick — it is a label beside its key. */
+    cursor: default;
+    padding: 6px var(--space-sm);
+}
+
+.keybindings-row + .keybindings-row,
+.keybindings-entry + .keybindings-entry .keybindings-row {
+    box-shadow: inset 0 1px 0 0 var(--border-subtle);
+}
+
+.keybindings-row.is-capturing {
+    background: var(--bg-tertiary);
+}
+
+.keybindings-label {
+    font-size: var(--text-sm);
+    font-weight: 500;
     color: var(--text-primary);
 }
 
-/* Customized binding — accent-primary highlight (not the success-green Button
-   active state); a binding the user changed from its default. */
-.keybindings-shortcut-custom {
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-    border-color: var(--accent-primary);
-    color: var(--accent-primary);
+/* ── The keycap control ────────────────────────────────────────────────── */
+
+/* Ghost button wrapping a Kbd: the cap is the affordance, the button is the
+   hit area. Fixed minimum so a one-letter key and Ctrl+Shift+Backspace do not
+   move the column. */
+.keybindings-shortcut {
+    min-width: 132px;
+    justify-content: flex-end;
+    padding: 4px 6px;
 }
 
-
-.keybindings-shortcut-editing {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: white;
-    cursor: default;
-    animation: pulse 1s ease-in-out infinite;
-    will-change: opacity;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-}
-
-/* Reset Button */
-.keybindings-reset {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-md);
+.keybindings-unbound {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--text-muted);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    display: flex;
+}
+
+/* Capture box — the same footprint as the cap it replaces, wearing the accent
+   edge and the shared focus ring so it reads as "listening" without blinking. */
+.keybindings-capture {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-width: 132px;
+    min-height: 26px;
+    padding: 4px 10px;
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    box-shadow: var(--focus-ring);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--accent-ink);
+}
+
+/* Reserve the revert column at all times so appearing/disappearing never
+   nudges the keycap sideways. */
+.keybindings-revert-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    flex: none;
+}
+
+.keybindings-reset {
+    color: var(--text-muted);
 }
 
 .keybindings-reset:hover {
-    border-color: var(--accent-warning);
-    color: var(--accent-warning);
-    background: color-mix(in srgb, var(--accent-warning) 10%, transparent);
-}
-
-/* Conflict Dialog */
-.keybindings-conflict-overlay {
-    position: fixed;
-    inset: 0;
-    background: color-mix(in srgb, var(--sketch-black) 50%, transparent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-.keybindings-conflict-dialog {
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-lg);
-    padding: var(--space-lg);
-    max-width: 400px;
-    width: 90%;
-    box-shadow: var(--shadow-menu);
-}
-
-.keybindings-conflict-title {
-    margin: 0 0 var(--space-md) 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-lg);
-    color: var(--accent-warning);
-}
-
-.keybindings-conflict-message {
-    margin: 0 0 var(--space-sm) 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
     color: var(--text-primary);
 }
 
-.keybindings-conflict-message strong {
-    font-family: var(--font-mono);
-    background: var(--bg-tertiary);
-    padding: 2px var(--space-xs);
-    border-radius: var(--radius-sm);
+/* ── Conflict, shown inside the row that raised it ─────────────────────── */
+
+.keybindings-conflict {
+    margin: var(--space-xs) 0 var(--space-sm);
+}
+
+.keybindings-conflict-message {
+    margin: 0 0 var(--space-xs);
 }
 
 .keybindings-conflict-list {
-    margin: 0 0 var(--space-md) 0;
+    margin: 0 0 var(--space-sm);
     padding-left: var(--space-lg);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
 }
 
 .keybindings-conflict-list li {
-    margin-bottom: var(--space-xs);
+    margin-bottom: 2px;
 }
 
 .keybindings-conflict-question {
-    margin: 0 0 var(--space-md) 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    margin: 0 0 var(--space-sm);
+}
+
+.keybindings-conflict-question strong {
+    color: var(--text-primary);
 }
 
 .keybindings-conflict-buttons {
     display: flex;
     gap: var(--space-sm);
-    justify-content: flex-end;
+    flex-wrap: wrap;
 }
 
+/* ── Error state (the boundary's fallback) ─────────────────────────────── */
 
-/* Error State */
 .keybindings-error {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: var(--space-sm);
     padding: var(--space-xl);
     text-align: center;
     background: var(--bg-tertiary);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--accent-danger);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
 }
 
 .keybindings-error h4 {
-    margin: 0 0 var(--space-sm) 0;
-    font-family: var(--font-sketch);
+    margin: 0;
+    font-family: var(--font-sans);
     font-size: var(--text-lg);
-    color: var(--accent-danger);
+    font-weight: 600;
+    color: var(--danger-ink);
 }
 
 .keybindings-error p {
-    margin: 0 0 var(--space-md) 0;
-    font-family: var(--font-sketch);
+    margin: 0 0 var(--space-sm);
+    max-width: 44ch;
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
+    line-height: 1.45;
     color: var(--text-secondary);
-    max-width: 300px;
-}
-
-.keybindings-error button {
-    padding: var(--space-sm) var(--space-md);
-    background: var(--accent-primary);
-    border: none;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: white;
-    cursor: pointer;
-    transition: background var(--transition-fast);
-}
-
-.keybindings-error button:hover {
-    background: var(--accent-secondary);
 }

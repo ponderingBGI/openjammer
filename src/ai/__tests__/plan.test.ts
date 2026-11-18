@@ -10,23 +10,30 @@
 import { describe, it, expect } from 'vitest';
 import { planToToolCalls, type PlanPortResolver, type WorkflowPlan } from '../plan';
 import { validatePlan, type PlanLookups } from '../planValidator';
+import { createPlanLookups, resolvePlanPort } from '../planAdapter';
 import type { PortDefinition } from '../../engine/types';
 
 // ---------------------------------------------------------------------------
 // Fake registry: a tiny world of looper / multiplier / speaker / mic.
+//
+// It speaks the SHIPPING vocabulary (`In` / `Out`). It used to say `Audio In` /
+// `Audio Out`, and when the real registry was renamed this whole file stayed
+// green while every documented plan broke against the real one — a fake that
+// drifts from the thing it stands in for is worse than no fake. The block at the
+// bottom of this file exercises the REAL registry for exactly that reason.
 // ---------------------------------------------------------------------------
 
 const PORTS: Record<string, PortDefinition[]> = {
     looper: [
-        { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
-        { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' },
+        { id: 'audio-in', name: 'In', type: 'audio', direction: 'input' },
+        { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' },
     ],
     multiplier: [
-        { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
-        { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' },
+        { id: 'audio-in', name: 'In', type: 'audio', direction: 'input' },
+        { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' },
     ],
-    speaker: [{ id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' }],
-    microphone: [{ id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' }],
+    speaker: [{ id: 'audio-in', name: 'In', type: 'audio', direction: 'input' }],
+    microphone: [{ id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }],
 };
 
 const fakeLookups: PlanLookups = {
@@ -54,8 +61,8 @@ describe('validatePlan', () => {
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
-                { from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'amp', port: 'Audio In' } },
-                { from: { ref: 'amp', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } },
+                { from: { ref: 'mic', port: 'Out' }, to: { ref: 'amp', port: 'In' } },
+                { from: { ref: 'amp', port: 'Out' }, to: { ref: 'out', port: 'In' } },
             ],
         };
         expect(validatePlan(plan, fakeLookups)).toEqual([]);
@@ -64,7 +71,7 @@ describe('validatePlan', () => {
     it('flags a wire ref that resolves to no plan node (WIRE_REF)', () => {
         const plan: WorkflowPlan = {
             nodes: [{ ref: 'out', type: 'speaker' }],
-            wires: [{ from: { ref: 'ghost', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } }],
+            wires: [{ from: { ref: 'ghost', port: 'Out' }, to: { ref: 'out', port: 'In' } }],
         };
         const errs = validatePlan(plan, fakeLookups);
         expect(errs.some((e) => e.code === 'WIRE_REF' && e.ref === 'ghost')).toBe(true);
@@ -90,7 +97,7 @@ describe('validatePlan', () => {
             ],
             wires: [
                 // "Bogus Port" is not on the mic.
-                { from: { ref: 'mic', port: 'Bogus Port' }, to: { ref: 'out', port: 'Audio In' } },
+                { from: { ref: 'mic', port: 'Bogus Port' }, to: { ref: 'out', port: 'In' } },
             ],
         };
         const errs = validatePlan(plan, fakeLookups);
@@ -105,7 +112,7 @@ describe('validatePlan', () => {
             ],
             wires: [
                 // mic Audio Out -> out Audio In is correct; reverse it to break direction.
-                { from: { ref: 'out', port: 'Audio In' }, to: { ref: 'mic', port: 'Audio Out' } },
+                { from: { ref: 'out', port: 'In' }, to: { ref: 'mic', port: 'Out' } },
             ],
         };
         const errs = validatePlan(plan, fakeLookups);
@@ -120,7 +127,7 @@ describe('validatePlan', () => {
                 { ref: 'mic', type: 'microphone' },
                 { ref: 'out', type: 'speaker' },
             ],
-            wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } }],
+            wires: [{ from: { ref: 'mic', port: 'Out' }, to: { ref: 'out', port: 'In' } }],
         };
         const errs = validatePlan(plan, refusing);
         expect(errs.some((e) => e.code === 'CANT_CONNECT')).toBe(true);
@@ -135,9 +142,9 @@ describe('validatePlan', () => {
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
-                { from: { ref: 'a', port: 'Audio Out' }, to: { ref: 'b', port: 'Audio In' } },
-                { from: { ref: 'b', port: 'Audio Out' }, to: { ref: 'a', port: 'Audio In' } },
-                { from: { ref: 'a', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } },
+                { from: { ref: 'a', port: 'Out' }, to: { ref: 'b', port: 'In' } },
+                { from: { ref: 'b', port: 'Out' }, to: { ref: 'a', port: 'In' } },
+                { from: { ref: 'a', port: 'Out' }, to: { ref: 'out', port: 'In' } },
             ],
         };
         const errs = validatePlan(plan, fakeLookups);
@@ -155,10 +162,10 @@ describe('validatePlan', () => {
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
-                { from: { ref: 'amp', port: 'Audio Out' }, to: { ref: 'lp', port: 'Audio In' } },
+                { from: { ref: 'amp', port: 'Out' }, to: { ref: 'lp', port: 'In' } },
                 // looper's own output edge — excluded from cycle detection.
-                { from: { ref: 'lp', port: 'Audio Out' }, to: { ref: 'amp', port: 'Audio In' } },
-                { from: { ref: 'lp', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } },
+                { from: { ref: 'lp', port: 'Out' }, to: { ref: 'amp', port: 'In' } },
+                { from: { ref: 'lp', port: 'Out' }, to: { ref: 'out', port: 'In' } },
             ],
         };
         const errs = validatePlan(plan, fakeLookups);
@@ -171,7 +178,7 @@ describe('validatePlan', () => {
                 { ref: 'mic', type: 'microphone' },
                 { ref: 'out', type: 'speaker' },
             ],
-            wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } }],
+            wires: [{ from: { ref: 'mic', port: 'Out' }, to: { ref: 'out', port: 'In' } }],
         };
         expect(validatePlan(plan, fakeLookups).some((e) => e.code === 'NO_SOUND')).toBe(false);
     });
@@ -182,7 +189,7 @@ describe('validatePlan', () => {
                 { ref: 'mic', type: 'microphone' },
                 { ref: 'amp', type: 'multiplier' },
             ],
-            wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'amp', port: 'Audio In' } }],
+            wires: [{ from: { ref: 'mic', port: 'Out' }, to: { ref: 'amp', port: 'In' } }],
         };
         const errs = validatePlan(plan, fakeLookups);
         expect(errs.some((e) => e.code === 'NO_SOUND')).toBe(true);
@@ -217,7 +224,7 @@ describe('planToToolCalls', () => {
                 { ref: 'mic', type: 'microphone' },
                 { ref: 'out', type: 'speaker' },
             ],
-            wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'out', port: 'Audio In' } }],
+            wires: [{ from: { ref: 'mic', port: 'Out' }, to: { ref: 'out', port: 'In' } }],
         };
         const calls = planToToolCalls(plan, { mic: 'n-mic', out: 'n-out' }, fakeResolve);
         const conn = calls.find((c) => c.name === 'add_connection');
@@ -240,5 +247,93 @@ describe('planToToolCalls', () => {
         };
         const adds = planToToolCalls(plan, {}, fakeResolve).filter((c) => c.name === 'add_node');
         expect(adds).toHaveLength(3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The REAL registry — the agent's shipped wire contract
+// ---------------------------------------------------------------------------
+
+/**
+ * W6-SHIP fix round, F3. Everything above this line runs against a FAKE registry,
+ * and that is why renaming the real port vocabulary broke `docs/agent-tools.md`'s
+ * worked example without turning a single test red: the fake had been taught the
+ * same old names, so it agreed with the code that was wrong.
+ *
+ * This block runs the doc's example — the one an agent is told to copy — through
+ * `resolvePlanPort` and `createPlanLookups`, i.e. the real built-in registry. It
+ * asserts both halves of the contract:
+ *
+ *  1. the CURRENT names in the doc resolve and validate, and
+ *  2. every RETIRED spelling still resolves, because an agent that learned
+ *     `"Audio Out"` from an older revision of that doc must not be silently
+ *     broken by our rename. Reversibility is the boundary, not obedience.
+ */
+describe('the agent wire contract, against the real registry', () => {
+    /** `docs/agent-tools.md`'s worked example, verbatim in shape. */
+    const docPlan = (outPort: string, inPort: string): WorkflowPlan => ({
+        nodes: [
+            { ref: 'lp', type: 'looper' },
+            { ref: 'amp', type: 'multiplier', params: { factor: 2 } },
+            { ref: 'out', type: 'speaker' },
+        ],
+        wires: [
+            // `In 1` is the multiplier's OWN name and has no alias — a port that
+            // carries a real name keeps it. The doc example used to say
+            // `Audio In` here, into a port that has never existed under any
+            // spelling, so it had been broken since before the rename.
+            { from: { ref: 'lp', port: outPort }, to: { ref: 'amp', port: 'In 1' } },
+            { from: { ref: 'amp', port: outPort }, to: { ref: 'out', port: inPort } },
+        ],
+    });
+
+    it('validates the documented plan with the CURRENT names', () => {
+        const errors = validatePlan(docPlan('Out', 'In'), createPlanLookups());
+        expect(errors, JSON.stringify(errors)).toEqual([]);
+    });
+
+    it('still validates a plan an agent learned with the RETIRED names', () => {
+        for (const [out, into] of [['Audio Out', 'Audio In'], ['Output', 'Input']] as const) {
+            const errors = validatePlan(docPlan(out, into), createPlanLookups());
+            expect(errors, `${out} -> ${into}: ${JSON.stringify(errors)}`).toEqual([]);
+        }
+    });
+
+    it('lowers every spelling to the SAME real port ids', () => {
+        // The aliases are not a second code path — they must land on the exact
+        // ids the current names land on, or an old plan would wire a new graph
+        // differently from a new one.
+        const ids = (out: string, into: string) =>
+            planToToolCalls(docPlan(out, into), { lp: 'n-lp', amp: 'n-amp', out: 'n-out' }, resolvePlanPort)
+                .filter((call) => call.name === 'add_connection')
+                .map((call) => {
+                    const args = call.args as { sourcePortId?: string; targetPortId?: string };
+                    return `${args.sourcePortId}->${args.targetPortId}`;
+                });
+        const current = ids('Out', 'In');
+        expect(current).toEqual(['audio-out->in-1', 'out->audio-in']);
+        expect(ids('Audio Out', 'Audio In')).toEqual(current);
+        expect(ids('Output', 'Input')).toEqual(current);
+        // `Audio` is deliberately NOT an alias on this path: a plan endpoint has
+        // no direction, so it would match a node's input and its output equally
+        // and `find` would take whichever came first — a cable wired backwards
+        // from a name the agent thought was precise. It stays a migration-only
+        // spelling, and the validator reports it rather than guessing.
+        expect(resolvePlanPort('speaker', 'Audio')).toBeUndefined();
+        expect(resolvePlanPort('looper', 'Audio')).toBeUndefined();
+        // The id itself is the one spelling that never moves. Asserted per port
+        // rather than through the plan, because the three nodes do not share ids
+        // (the multiplier's output really is `out`, not `audio-out`).
+        expect(resolvePlanPort('looper', 'audio-out')).toBe('audio-out');
+        expect(resolvePlanPort('speaker', 'audio-in')).toBe('audio-in');
+        expect(resolvePlanPort('multiplier', 'out')).toBe('out');
+    });
+
+    it('does not invent a match for a name no port carries', () => {
+        // The aliases widen the generic pair only; a typo must still be caught by
+        // the validator rather than silently resolving to something plausible.
+        expect(resolvePlanPort('speaker', 'Audio Outt')).toBeUndefined();
+        expect(resolvePlanPort('speaker', 'Sidechain')).toBeUndefined();
+        expect(validatePlan(docPlan('Out', 'Sidechain'), createPlanLookups()).length).toBeGreaterThan(0);
     });
 });

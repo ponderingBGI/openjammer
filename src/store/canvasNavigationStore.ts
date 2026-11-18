@@ -26,6 +26,7 @@ interface CanvasNavigationState {
 
     // Root level viewport state (since root has no node to store it)
     rootViewState: RootViewState | null;
+    viewStates: Map<string, RootViewState>;
 
     // Actions
     enterNode: (nodeId: string) => void;
@@ -40,6 +41,7 @@ interface CanvasNavigationState {
 export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get) => ({
     currentViewNodeId: null,
     rootViewState: null,
+    viewStates: new Map(),
 
     // Enter a node's internal view
     enterNode: (nodeId: string) => {
@@ -67,31 +69,20 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
                 }
             });
         } else {
-            // Currently inside a node - save to that node's internalViewport
-            const currentNode = graphStore.nodes.get(state.currentViewNodeId);
-            if (currentNode) {
-                const updatedNode: GraphNode = {
-                    ...currentNode,
-                    internalViewport: {
-                        pan: { ...canvasStore.pan },
-                        zoom: canvasStore.zoom
-                    }
-                };
-                // Directly update the node in the store
-                const newNodes = new Map(graphStore.nodes);
-                newNodes.set(currentNode.id, updatedNode);
-                useGraphStore.setState({ nodes: newNodes });
-            }
+            const viewStates = new Map(state.viewStates);
+            viewStates.set(state.currentViewNodeId, { pan: { ...canvasStore.pan }, zoom: canvasStore.zoom });
+            set({ viewStates });
         }
 
         // Update current view to the target node
         set({ currentViewNodeId: nodeId });
 
         // Restore or initialize viewport for the new view
-        if (targetNode.internalViewport) {
+        const targetViewState = get().viewStates.get(nodeId);
+        if (targetViewState) {
             // Restore previously saved viewport
-            canvasStore.setPan(targetNode.internalViewport.pan);
-            canvasStore.setZoom(targetNode.internalViewport.zoom);
+            canvasStore.setPan(targetViewState.pan);
+            canvasStore.setZoom(targetViewState.zoom);
         } else {
             // First time entering - auto-center on children
             const children = graphStore.getNodeChildren(nodeId);
@@ -117,10 +108,10 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
                     centerY: (minY + maxY) / 2
                 };
 
-                canvasStore.fitToNodes(bounds, window.innerWidth, window.innerHeight);
+                canvasStore.fitToNodes(bounds, canvasStore.canvasRect.width, canvasStore.canvasRect.height);
             } else {
                 // No children - center on origin
-                canvasStore.setPan({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+                canvasStore.setPan({ x: canvasStore.canvasRect.width / 2, y: canvasStore.canvasRect.height / 2 });
                 canvasStore.setZoom(1);
             }
         }
@@ -154,17 +145,9 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
         // Clear selection when changing levels
         graphStore.clearSelection();
 
-        // Save current viewport to the node we're leaving
-        const updatedCurrentNode: GraphNode = {
-            ...currentNode,
-            internalViewport: {
-                pan: { ...canvasStore.pan },
-                zoom: canvasStore.zoom
-            }
-        };
-        const newNodes = new Map(graphStore.nodes);
-        newNodes.set(currentNode.id, updatedCurrentNode);
-        useGraphStore.setState({ nodes: newNodes });
+        const viewStates = new Map(state.viewStates);
+        viewStates.set(currentNode.id, { pan: { ...canvasStore.pan }, zoom: canvasStore.zoom });
+        set({ viewStates });
 
         // Move up to parent's view
         const parentId = currentNode.parentId;
@@ -179,10 +162,10 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
             }
         } else {
             // Going back to another node
-            const parentNode = graphStore.nodes.get(parentId);
-            if (parentNode?.internalViewport) {
-                canvasStore.setPan(parentNode.internalViewport.pan);
-                canvasStore.setZoom(parentNode.internalViewport.zoom);
+            const parentViewState = viewStates.get(parentId);
+            if (parentViewState) {
+                canvasStore.setPan(parentViewState.pan);
+                canvasStore.setZoom(parentViewState.zoom);
             }
         }
     },
@@ -196,20 +179,9 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
         // Already at root
         if (state.currentViewNodeId === null) return;
 
-        // Save current viewport before leaving
-        const currentNode = graphStore.nodes.get(state.currentViewNodeId);
-        if (currentNode) {
-            const updatedNode: GraphNode = {
-                ...currentNode,
-                internalViewport: {
-                    pan: { ...canvasStore.pan },
-                    zoom: canvasStore.zoom
-                }
-            };
-            const newNodes = new Map(graphStore.nodes);
-            newNodes.set(currentNode.id, updatedNode);
-            useGraphStore.setState({ nodes: newNodes });
-        }
+        const viewStates = new Map(state.viewStates);
+        viewStates.set(state.currentViewNodeId, { pan: { ...canvasStore.pan }, zoom: canvasStore.zoom });
+        set({ viewStates });
 
         // Clear selection
         graphStore.clearSelection();

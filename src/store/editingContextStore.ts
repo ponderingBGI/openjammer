@@ -40,12 +40,45 @@ export interface TimeRangeSelection {
 
 export type SelectionSnapshot = ObjectSelection;
 
+interface SurfaceSelectionHistory {
+    entries: SelectionSnapshot[];
+    index: number;
+    depth: number;
+    before: SelectionSnapshot | null;
+}
+
+export interface ClipDragPreview {
+    clipId: string;
+    sourceTrackId: string;
+    hoveredTrackId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    copy: boolean;
+    /** VIEW ONLY — the tick the clip would land on, for the drag readout chip. */
+    tick: number;
+    /**
+     * VIEW ONLY — where the gesture started, taken from the pre-gesture
+     * document, so the readout can show an honest delta rather than a delta
+     * measured against a value the preview has already moved.
+     */
+    originTick: number;
+    /**
+     * VIEW ONLY — the drop is a no-op. `moveClips` skips locked clips, so this
+     * is the one genuinely invalid drop the document model has; saying so before
+     * the release is more honest than a gesture that silently does nothing.
+     */
+    locked: boolean;
+}
+
 export interface SurfaceViewport {
     pxPerTick: number;
     leftTick: number;
     yOrigin: number;
     zoomFocus: ZoomFocus;
-    tool: 'select' | 'draw';
+    /** U11: four real tools. `'time'` was a fifth name nothing ever read. */
+    tool: 'select' | 'draw' | 'erase' | 'knife';
     selection: ObjectSelection;
 }
 
@@ -88,12 +121,32 @@ export function gridTicks(unit: GridUnit, ticksPerBeat: number, ticksPerBar: num
     return ticks;
 }
 
-export function snapTick(rawTick: number, candidates: readonly number[], pxPerTick: number, mode: SnapMode, invert = false, ensure = false): number {
-    if (!candidates.length) return rawTick;
-    const enabled = ensure || (mode === 'magnetic') !== invert;
-    if (!enabled) return rawTick;
-    const nearest = candidates.reduce((best, value) => Math.abs(value - rawTick) < Math.abs(best - rawTick) ? value : best);
-    return ensure || Math.abs(nearest - rawTick) * pxPerTick <= 25 ? nearest : rawTick;
+export interface TimelineSnapResult { tick: number; indicatorTick: number | null; target: 'grid' | 'anchor' | null }
+
+/** Magnetic timeline snap. Meaningful anchors win equal-distance ties. */
+export function snapTimeline(options: {
+    rawTick: number;
+    gridUnitTicks: number | null;
+    anchorTicks?: readonly number[];
+    pxPerTick: number;
+    mode: SnapMode;
+    invert?: boolean;
+    relativeOffsetTick?: number;
+    target?: SnapTarget;
+}): TimelineSnapResult {
+    const { rawTick, pxPerTick, gridUnitTicks, mode, invert = false, relativeOffsetTick = 0, target = 'both' } = options;
+    const enabled = (mode === 'magnetic') !== invert;
+    if (!enabled) return { tick: rawTick, indicatorTick: null, target: null };
+    const grid = target !== 'other' && gridUnitTicks && gridUnitTicks * pxPerTick >= 3
+        ? Math.round((rawTick - relativeOffsetTick) / gridUnitTicks) * gridUnitTicks + relativeOffsetTick
+        : null;
+    const anchor = target !== 'grid' ? (options.anchorTicks ?? []).reduce<number | null>((best, value) => best === null || Math.abs(value - rawTick) < Math.abs(best - rawTick) ? value : best, null) : null;
+    const gridDistance = grid === null ? Infinity : Math.abs(grid - rawTick) * pxPerTick;
+    const anchorDistance = anchor === null ? Infinity : Math.abs(anchor - rawTick) * pxPerTick;
+    const useAnchor = anchorDistance <= 18 && anchorDistance <= gridDistance;
+    const useGrid = gridDistance <= 12;
+    const tick = useAnchor ? anchor! : useGrid ? grid! : rawTick;
+    return { tick, indicatorTick: Math.abs(tick - rawTick) * pxPerTick >= 1 ? tick : null, target: useAnchor ? 'anchor' : useGrid ? 'grid' : null };
 }
 
 interface EditingContextState {
@@ -114,7 +167,6 @@ interface EditingContextState {
     quantizeSnapStart: boolean;
     quantizeSnapEnd: boolean;
     overlapPolicy: NoteOverlapPolicy;
-    scrollVelocityEditing: boolean;
     selectLastDrawnNoteOnly: boolean;
     stepEntry: StepEntryState;
     nudgeAmount: GridUnit;
@@ -124,11 +176,11 @@ interface EditingContextState {
     enteredTrackId: string | null;
     enteredClipId: string | null;
     lastPointerTick: number | null;
-    selectionHistory: SelectionSnapshot[];
-    selectionHistoryIndex: number;
-    selectionOpDepth: number;
-    selectionOpBefore: SelectionSnapshot | null;
+    selectionHistoryBySurface: Record<SurfaceId, SurfaceSelectionHistory>;
     dragActive: boolean;
+    activeClipDragIds: string[];
+    clipDragPreview: ClipDragPreview | null;
+    snapIndicatorTick: number | null;
     followPlayhead: boolean;
     followEdits: boolean;
     moveAutomationWithClips: boolean;
@@ -138,10 +190,14 @@ interface EditingContextState {
     setSnapTarget: (target: SnapTarget) => void;
     setEditMode: (mode: EditMode) => void;
     setDragActive: (active: boolean) => void;
+    setActiveClipDragIds: (ids: string[]) => void;
+    setClipDragPreview: (preview: ClipDragPreview | null) => void;
+    setSnapIndicatorTick: (tick: number | null) => void;
     setSelection: (surface: SurfaceId, selection: Partial<ObjectSelection>) => void;
     clearSelection: (surface: SurfaceId) => void;
     beginSelectionOp: (surface: SurfaceId) => void;
     commitSelectionOp: (surface: SurfaceId) => void;
+    abortSelectionOp: (surface: SurfaceId) => void;
     beginSelectionOpHistory: (surface?: SurfaceId) => void;
     undoSelection: (surface: SurfaceId) => void;
     redoSelection: (surface: SurfaceId) => void;
@@ -169,7 +225,6 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     quantizeSnapStart: true,
     quantizeSnapEnd: false,
     overlapPolicy: 'truncate-existing',
-    scrollVelocityEditing: true,
     selectLastDrawnNoteOnly: true,
     stepEntry: { trackId: null, positionTick: 0, length: '1/16', velocity: 96, channel: 1, octave: 4, chordMode: false, triplet: false, dotted: false, sustain: false, pitch: 60 },
     nudgeAmount: '1/16',
@@ -178,12 +233,16 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     enteredTrackId: null,
     enteredClipId: null,
     lastPointerTick: null,
-    selectionHistory: [emptySelection()],
-    selectionHistoryIndex: 0,
-    selectionOpDepth: 0,
-    selectionOpBefore: null,
+    selectionHistoryBySurface: {
+        canvas: { entries: [emptySelection()], index: 0, depth: 0, before: null },
+        arrangement: { entries: [emptySelection()], index: 0, depth: 0, before: null },
+        pianoroll: { entries: [emptySelection()], index: 0, depth: 0, before: null },
+    },
     dragActive: false,
-    followPlayhead: false,
+    activeClipDragIds: [],
+    clipDragPreview: null,
+    snapIndicatorTick: null,
+    followPlayhead: true,
     followEdits: false,
     moveAutomationWithClips: true,
     viewports: { canvas: makeViewport(), arrangement: makeViewport(), pianoroll: makeViewport() },
@@ -192,6 +251,9 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     setSnapTarget: (snapTarget) => set({ snapTarget }),
     setEditMode: (editMode) => set({ editMode }),
     setDragActive: (dragActive) => set({ dragActive }),
+    setActiveClipDragIds: (activeClipDragIds) => set({ activeClipDragIds }),
+    setClipDragPreview: (clipDragPreview) => set({ clipDragPreview }),
+    setSnapIndicatorTick: (snapIndicatorTick) => set({ snapIndicatorTick }),
     setSelection: (surface, patch) => set((state) => {
         const current = state.viewports[surface].selection;
         const hasObjects = Boolean((patch.clipIds?.length ?? 0) || (patch.noteIds?.length ?? 0) || (patch.automationPointIds?.length ?? 0));
@@ -206,33 +268,50 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     }),
     clearSelection: (surface) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: emptySelection() } } })),
     beginSelectionOp: (surface) => set((state) => ({
-        selectionOpDepth: state.selectionOpDepth + 1,
-        selectionOpBefore: state.selectionOpDepth === 0 ? structuredClone(state.viewports[surface].selection) : state.selectionOpBefore,
+        selectionHistoryBySurface: {
+            ...state.selectionHistoryBySurface,
+            [surface]: {
+                ...state.selectionHistoryBySurface[surface],
+                depth: state.selectionHistoryBySurface[surface].depth + 1,
+                before: state.selectionHistoryBySurface[surface].depth === 0
+                    ? structuredClone(state.viewports[surface].selection)
+                    : state.selectionHistoryBySurface[surface].before,
+            },
+        },
     })),
     commitSelectionOp: (surface) => set((state) => {
-        if (state.selectionOpDepth === 0) return {};
-        if (state.selectionOpDepth > 1) return { selectionOpDepth: state.selectionOpDepth - 1 };
+        const history = state.selectionHistoryBySurface[surface];
+        if (history.depth === 0) return {};
+        if (history.depth > 1) return { selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: { ...history, depth: history.depth - 1 } } };
         const current = structuredClone(state.viewports[surface].selection);
-        const top = state.selectionHistory[state.selectionHistoryIndex];
-        if (top && JSON.stringify(top) === JSON.stringify(current)) return { selectionOpDepth: 0, selectionOpBefore: null };
-        const kept = state.selectionHistory.slice(state.selectionHistoryIndex);
-        return { selectionOpDepth: 0, selectionOpBefore: null, selectionHistory: [current, ...kept].slice(0, 100), selectionHistoryIndex: 0 };
+        const top = history.entries[history.index];
+        const next = top && JSON.stringify(top) === JSON.stringify(current)
+            ? { ...history, depth: 0, before: null }
+            : { entries: [current, ...history.entries.slice(history.index)].slice(0, 100), index: 0, depth: 0, before: null };
+        return { selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: next } };
+    }),
+    abortSelectionOp: (surface) => set((state) => {
+        const history = state.selectionHistoryBySurface[surface];
+        if (history.depth === 0 || !history.before) return {};
+        return {
+            viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(history.before) } },
+            selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: { ...history, depth: 0, before: null } },
+        };
     }),
     beginSelectionOpHistory: (surface = 'arrangement') => set((state) => ({
-        selectionHistory: [structuredClone(state.viewports[surface].selection)],
-        selectionHistoryIndex: 0,
-        selectionOpDepth: 0,
-        selectionOpBefore: null,
+        selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: { entries: [structuredClone(state.viewports[surface].selection)], index: 0, depth: 0, before: null } },
     })),
     undoSelection: (surface) => set((state) => {
-        const index = Math.min(state.selectionHistory.length - 1, state.selectionHistoryIndex + 1);
-        const selection = state.selectionHistory[index];
-        return selection ? { selectionHistoryIndex: index, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
+        const history = state.selectionHistoryBySurface[surface];
+        const index = Math.min(history.entries.length - 1, history.index + 1);
+        const selection = history.entries[index];
+        return selection ? { selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: { ...history, index } }, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
     }),
     redoSelection: (surface) => set((state) => {
-        const index = Math.max(0, state.selectionHistoryIndex - 1);
-        const selection = state.selectionHistory[index];
-        return selection ? { selectionHistoryIndex: index, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
+        const history = state.selectionHistoryBySurface[surface];
+        const index = Math.max(0, history.index - 1);
+        const selection = history.entries[index];
+        return selection ? { selectionHistoryBySurface: { ...state.selectionHistoryBySurface, [surface]: { ...history, index } }, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
     }),
     setViewport: (surface, patch) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...patch } } })),
     zoomAt: (surface, pointerPx, factor, ticksPerBar) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...zoomAroundPointer(state.viewports[surface], pointerPx, factor, ticksPerBar) } } })),

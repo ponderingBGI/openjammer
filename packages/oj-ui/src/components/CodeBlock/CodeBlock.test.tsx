@@ -6,7 +6,7 @@ describe('CodeBlock', () => {
     it('renders a pre with the base class and is selectable by default', () => {
         const { container } = render(<CodeBlock text="hi" />);
         const pre = container.querySelector('pre')!;
-        expect(pre.className).toBe('oj-code');
+        expect(pre.className).toContain('oj-code');
         expect(pre.textContent).toBe('hi');
     });
 

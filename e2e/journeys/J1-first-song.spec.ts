@@ -1,15 +1,30 @@
 import { expect, test } from '@playwright/test';
 import { assertAudiblePeak, assertMusicalDuration, assertSectionsDiffer, decodeWav, energyFingerprint } from '../helpers/audio';
-import { exportSong, openStarter, pointerDrag } from './support';
+import { exportSong, installEngineProbe, openStarter, pointerDrag } from './support';
 
 test('@journey J1 First Song — start, play, mix, export, and hear the result', async ({ page }) => {
     test.setTimeout(180_000);
+    /*
+     * The pill tells the truth about the transport, which is why it needs the
+     * engine mirror here. Its glyph, `aria-label` and `title` all read `Play`
+     * until the engine CONFIRMS motion (`TransportPillHost`: "a Stop glyph over
+     * a frozen playhead is the worst lie this component can tell"), and headless
+     * Chromium never returns a `TransportFrame`. Without this the assertion below
+     * is waiting for a state the product is right to refuse.
+     */
+    await installEngineProbe(page);
     await openStarter(page, 'First Light');
 
-    await page.getByTitle('Play').click();
-    await expect(page.getByTitle('Stop')).toBeVisible();
+    /*
+     * By ACCESSIBLE NAME, not by title: the title now carries the shortcut hint
+     * (`Play (Space)`), while `aria-label` stays the bare verb — so the name is
+     * both the stabler handle and the thing a screen reader actually announces.
+     */
+    const transport = page.getByRole('group', { name: 'Transport' });
+    await transport.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect(transport.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
     await page.waitForTimeout(250);
-    await page.getByTitle('Stop').click();
+    await transport.getByRole('button', { name: 'Stop', exact: true }).click();
 
     await page.getByTitle('Open mixer').click();
     const fader = page.getByRole('region', { name: /mixer/i }).getByRole('slider', { name: /gain/i }).first();

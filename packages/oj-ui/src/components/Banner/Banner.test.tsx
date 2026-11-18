@@ -11,14 +11,14 @@ describe('Banner', () => {
         expect(root.getAttribute('role')).toBe('status');
     });
 
-    it('builds on the Surface chrome (node fill, hard menu shadow)', () => {
+    it('builds on the raised Surface chrome', () => {
         const { container } = render(<Banner tone="warning" title="t" />);
         const root = container.querySelector('.oj-banner')!;
         expect(root.className).toContain('oj-surface');
-        expect(root.className).toContain('oj-surface--elevation-menu');
+        expect(root.className).toContain('oj-surface--elevation-raised');
     });
 
-    it('renders the title in the neutral body, not a state-colored heading', () => {
+    it('renders the title in its tone-aware heading slot', () => {
         const { container } = render(<Banner tone="info" title="A new interface" />);
         const title = container.querySelector('.oj-banner__title')!;
         expect(title.textContent).toBe('A new interface');

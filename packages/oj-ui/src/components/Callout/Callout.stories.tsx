@@ -35,7 +35,7 @@ export const TitleAndIconOptional: Story = () => (
             Icon, no title.
         </Callout>
         <Callout variant="tip" title="Title, no icon">
-            The accent still shows on the left edge.
+            The title carries the accent while the body stays neutral.
         </Callout>
     </div>
 );

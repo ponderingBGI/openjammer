@@ -1,43 +1,64 @@
-/* AudioHealthPanel (§4) — inner-content layout only. The overlay chrome
-   (scrim/panel), the header strip, the status dots, and the action buttons are
-   all oj-ui primitives (Modal/PanelHeader/StatusDot/Button), which own their
-   tokens. This file is just the rows readout + footer row. A calm at-a-glance
-   status panel. */
+/*
+ * AudioHealthPanel (§4) — inner-content layout only.
+ *
+ * The overlay chrome, the header strip, the verdict Callout, the status dots,
+ * the rows and the action buttons are all oj-ui primitives (Modal / PanelHeader
+ * / Callout / StatusDot / List / ListRow / Button), which own their tokens.
+ * This file is the verdict slot, the rows readout, and the footer row.
+ */
+
+.ah-verdict {
+    padding: var(--space-md) var(--space-md) 0;
+}
 
 .ah-rows {
-    padding: var(--space-sm) var(--space-md);
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 0;
+    padding: var(--space-sm) var(--space-md);
+    overflow: visible;
 }
 
 .ah-row {
+    cursor: default;
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.ah-row + .ah-row {
+    box-shadow: inset 0 1px 0 0 var(--border-subtle);
+}
+
+.ah-row .oj-list-row__body {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-xs) 0;
+    min-width: 0;
 }
 
 .ah-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--text-primary);
 }
 
+/* An exact reading: mono, tabular, quiet. */
 .ah-value {
-    margin-left: auto;
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    color: var(--text-secondary, var(--text-muted));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
     text-align: right;
 }
 
 .ah-footer {
     display: flex;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-top: var(--border-sketch-width) solid var(--sketch-black);
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+    border-top: 1px solid var(--border-subtle);
 }
 
 .ah-footer__btn {
     flex: 1;
+    justify-content: center;
 }

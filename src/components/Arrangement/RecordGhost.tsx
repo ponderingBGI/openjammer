@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { CapturedNote } from '@openjammer/oj-protocol';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { registerTimelineFrameWriter } from './sharedAnimationFrame';
 
 export function RecordGhost({
     node, startTick, endTick, pxPerTick, laneHeight, notes, pitchRange,
@@ -15,17 +16,14 @@ export function RecordGhost({
 }) {
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
-        let frame = 0;
         const paint = () => {
             const element = ref.current;
             if (element) {
                 const tick = Math.min(endTick, Math.max(startTick, useArrangementStore.getState().currentTick()));
                 element.style.width = `${Math.max(1, (tick - startTick) * pxPerTick)}px`;
             }
-            frame = requestAnimationFrame(paint);
         };
-        frame = requestAnimationFrame(paint);
-        return () => cancelAnimationFrame(frame);
+        return registerTimelineFrameWriter(paint);
     }, [endTick, pxPerTick, startTick]);
 
     const marks = useMemo(() => notes.filter((note) => note.node === node && note.on), [node, notes]);

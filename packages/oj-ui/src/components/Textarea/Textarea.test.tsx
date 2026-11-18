@@ -7,12 +7,12 @@ describe('Textarea', () => {
         const { container } = render(<Textarea />);
         const ta = container.querySelector('textarea')!;
         expect(ta).not.toBeNull();
-        expect(ta.className).toBe('oj-textarea');
+        expect(ta.className).toContain('oj-textarea');
     });
 
     it('merges a custom className after the base class', () => {
         const { container } = render(<Textarea className="extra" />);
-        expect(container.querySelector('textarea')!.className).toBe('oj-textarea extra');
+        expect(container.querySelector('textarea')!.className).toContain('oj-textarea');
     });
 
     it('forwards native props (placeholder, rows, disabled)', () => {

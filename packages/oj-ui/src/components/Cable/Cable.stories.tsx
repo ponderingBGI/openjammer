@@ -12,7 +12,7 @@ function Stage({ children }: { children: React.ReactNode }) {
             height={220}
             style={{
                 background: 'var(--bg-canvas)',
-                border: 'var(--border-sketch-width) solid var(--border-subtle)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-lg)',
             }}
         >
@@ -47,6 +47,16 @@ export const SelectedAndBundled: Story = () => (
             bundled
             bundleCount={4}
         />
+    </Stage>
+);
+
+/** Quiet is the resting state of every cable on the canvas: 2.5px, 45%, no
+ *  glow. Only the signal formula lights a wire up. */
+export const Quiet: Story = () => (
+    <Stage>
+        <Cable kind="audio" start={{ x: 30, y: 60 }} end={{ x: 330, y: 60 }} />
+        <Cable kind="control" start={{ x: 30, y: 110 }} end={{ x: 330, y: 110 }} />
+        <Cable kind="universal" start={{ x: 30, y: 160 }} end={{ x: 330, y: 160 }} />
     </Stage>
 );
 

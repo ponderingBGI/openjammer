@@ -1,11 +1,14 @@
 /**
- * MIDI Device Card - Device preview card for browser grid
+ * MIDI Device Card — one device or preset in the browser grid.
  *
- * Shows device name, manufacturer, connection status, and icon
+ * A real button (so Tab, Enter and Space all work for free) wearing the New DNA
+ * card physics: surface fill, one hairline, sh1, a 2px hover lift and a spring
+ * press. "Connected" is a StatusDot beside the word `Connected` in success ink —
+ * never a pulsing halo. Nothing glows here; only signal glows.
  */
 
 import { useMemo } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import { StatusDot } from '@openjammer/oj-ui';
 import { getPresetRegistry } from '../../midi';
 import './MIDIDeviceCard.css';
 
@@ -42,29 +45,27 @@ export function MIDIDeviceCard({
     const displayManufacturer = manufacturer || preset?.manufacturer || 'Unknown';
 
     return (
-        <Button
-            className={`midi-device-card ${isConnected ? 'connected' : ''}`}
-            onClick={onClick}
+        <button
             type="button"
+            className={`midi-device-card ${isConnected ? 'is-connected' : ''}`}
+            aria-label={`${name}, ${displayManufacturer}${isConnected ? ', connected' : ''}`}
+            onClick={onClick}
         >
-            {/* Device icon/image */}
-            <div className="midi-device-card-icon">
+            <span className="midi-device-card-icon" aria-hidden="true">
                 {icon && <span className="midi-device-emoji">{icon}</span>}
-            </div>
+            </span>
 
-            {/* Device info */}
-            <div className="midi-device-card-info">
+            <span className="midi-device-card-info">
                 <span className="midi-device-card-name">{name}</span>
                 <span className="midi-device-card-manufacturer">{displayManufacturer}</span>
-            </div>
+            </span>
 
-            {/* Connection indicator */}
             {isConnected && (
-                <div className="midi-device-card-status">
-                    <div className="midi-device-status-dot connected" />
-                    <span>Connected</span>
-                </div>
+                <span className="midi-device-card-status">
+                    <StatusDot status="ok" />
+                    Connected
+                </span>
             )}
-        </Button>
+        </button>
     );
 }

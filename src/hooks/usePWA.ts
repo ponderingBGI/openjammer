@@ -165,6 +165,7 @@ export function useServiceWorker(): UseServiceWorkerResult {
 
   useEffect(() => {
     if (native) return;
+    let cancelled = false;
     // A long-open session (a live set) may never navigate, so the browser's own
     // SW update checks (navigation + ~24h) can miss a fresh deploy. Poll for one
     // periodically; a found update is surfaced via onNeedRefresh and applied on
@@ -172,15 +173,18 @@ export function useServiceWorker(): UseServiceWorkerResult {
     let updatePoll: ReturnType<typeof setInterval> | undefined;
     // Dynamic import to avoid issues during SSR/testing
     import('virtual:pwa-register').then(({ registerSW }) => {
+      if (cancelled) return;
       const update = registerSW({
         onNeedRefresh() {
+          if (cancelled) return;
           setNeedRefresh(true);
         },
         onOfflineReady() {
+          if (cancelled) return;
           setOfflineReady(true);
         },
         onRegistered(registration: ServiceWorkerRegistration | undefined) {
-          if (registration) {
+          if (!cancelled && registration) {
             updatePoll = setInterval(() => {
               void registration.update();
             }, SW_UPDATE_POLL_MS);
@@ -190,11 +194,12 @@ export function useServiceWorker(): UseServiceWorkerResult {
           console.error('[SW] Registration error:', error);
         },
       });
-      setUpdateSW(() => update);
+      if (!cancelled) setUpdateSW(() => update);
     }).catch(() => {
       // PWA not available (dev mode or unsupported)
     });
     return () => {
+      cancelled = true;
       if (updatePoll) clearInterval(updatePoll);
     };
   }, [native]);

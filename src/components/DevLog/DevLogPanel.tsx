@@ -32,6 +32,8 @@ import {
     Button,
     Input,
     Chip,
+    List,
+    ListRow,
     StatusDot,
     type ChipTone,
     type StatusDotStatus,
@@ -49,7 +51,11 @@ import './DevLogPanel.css';
 /** Severities in display order, for the level facet chips. */
 const LEVELS: readonly Severity[] = ['Trace', 'Debug', 'Info', 'Warn', 'Error'];
 
-/** The level → StatusDot status mapping for the facet chips' leading dots. */
+/**
+ * The level → StatusDot status mapping. The dot lives on the ROW, beside the
+ * level word — never inside the filter chip (a chip is a quiet token; a dot in
+ * it reads as a second, competing signal).
+ */
 const LEVEL_DOT: Readonly<Record<Severity, StatusDotStatus>> = {
     Trace: 'idle',
     Debug: 'idle',
@@ -197,8 +203,36 @@ function DevLogPanelInner() {
         );
     }, []);
 
+    // Copy exactly what is on screen — the filtered view, one tab-separated line
+    // per row, so it pastes into an issue or a chat as a readable table.
+    const [copied, setCopied] = useState(false);
+    const copyVisible = useCallback(() => {
+        const text = filtered
+            .map((entry) =>
+                [
+                    formatTime(entry.ts),
+                    entry.level,
+                    entry.scope,
+                    entry.message,
+                    entry.fields !== undefined ? JSON.stringify(entry.fields) : '',
+                ]
+                    .filter(Boolean)
+                    .join('\t'),
+            )
+            .join('\n');
+        navigator.clipboard?.writeText(text).then(
+            () => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+            },
+            () => {
+                // Clipboard denied — the rows are selectable text either way.
+            },
+        );
+    }, [filtered]);
+
     return (
-        <Modal open={open} onClose={close} ariaLabel="Developer Log" align="bottom" size="lg">
+        <Modal open={open} onClose={close} ariaLabel="Developer Log" align="bottom" size="auto">
             <div className="devlog-panel">
                 {/* ── Header ─────────────────────────────────────────────── */}
                 <PanelHeader
@@ -222,14 +256,21 @@ function DevLogPanelInner() {
                     actions={
                         <>
                             <Button
+                                variant="ghost"
+                                onClick={copyVisible}
+                                title="Copy the rows currently shown, tab-separated"
+                            >
+                                {copied ? 'Copied' : 'Copy'}
+                            </Button>
+                            <Button variant="ghost" onClick={clear} title="Clear all log entries">
+                                Clear
+                            </Button>
+                            <Button
                                 variant="primary"
                                 onClick={askAi}
                                 title="Open the AI assistant seeded to diagnose + fix this from the logs"
                             >
                                 Ask AI to fix this
-                            </Button>
-                            <Button onClick={clear} title="Clear all log entries">
-                                Clear
                             </Button>
                         </>
                     }
@@ -248,7 +289,6 @@ function DevLogPanelInner() {
                                     tabIndex={0}
                                     tone={LEVEL_TONE[level]}
                                     pressed={active}
-                                    glyph={<StatusDot status={LEVEL_DOT[level]} />}
                                     count={levelTally[level]}
                                     aria-pressed={active}
                                     aria-label={`Filter by ${level} (${levelTally[level]})`}
@@ -303,10 +343,11 @@ function DevLogPanelInner() {
                     />
                 </div>
 
-                {/* Active correlation banner (click-to-correlate). */}
+                {/* Active correlation strip (click-to-correlate). */}
                 {activeCorr !== null && (
-                    <div className="devlog-corr-banner">
-                        Showing correlation #{activeCorr}
+                    <div className="devlog-corr-banner" role="status">
+                        <StatusDot status="info" />
+                        <span>Showing correlation #{activeCorr}</span>
                         <Button variant="link" onClick={() => setActiveCorr(null)}>
                             clear
                         </Button>
@@ -375,24 +416,31 @@ function LogList({
 
     return (
         <div
-            className="devlog-list"
+            className="devlog-list oj-scroll"
             ref={scrollRef}
             onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
         >
             {/* Spacer establishes the full scroll height; rows are absolutely placed. */}
-            <div className="devlog-rows" style={{ height: total * ROW_HEIGHT }}>
+            <List role="log" aria-label="Log entries" className="devlog-rows" style={{ height: total * ROW_HEIGHT }}>
                 {slice.map((entry, i) => {
                     const index = firstVisible + i;
+                    const clickable = entry.corr !== undefined;
                     return (
-                        <div
+                        <ListRow
                             key={entry.id}
                             className="devlog-row"
                             data-level={entry.level}
-                            data-clickable={entry.corr !== undefined}
+                            data-clickable={clickable}
                             style={{ top: index * ROW_HEIGHT }}
                             onClick={() => onRowClick(entry)}
-                            title={entry.corr !== undefined ? `Click to correlate (#${entry.corr})` : undefined}
+                            title={clickable ? `Click to correlate (#${entry.corr})` : undefined}
+                            actions={
+                                clickable ? <span className="devlog-cell-corr">#{entry.corr}</span> : undefined
+                            }
                         >
+                            {/* The level indicator is a dot BESIDE the word, so the
+                                state never rides on colour alone. */}
+                            <StatusDot status={LEVEL_DOT[entry.level]} />
                             <span className="devlog-cell-ts">{formatTime(entry.ts)}</span>
                             <span className="devlog-cell-level" data-level={entry.level}>
                                 {entry.level}
@@ -404,11 +452,10 @@ function LogList({
                                     <span className="devlog-cell-fields">{JSON.stringify(entry.fields)}</span>
                                 )}
                             </span>
-                            {entry.corr !== undefined && <span className="devlog-cell-corr">#{entry.corr}</span>}
-                        </div>
+                        </ListRow>
                     );
                 })}
-            </div>
+            </List>
         </div>
     );
 }

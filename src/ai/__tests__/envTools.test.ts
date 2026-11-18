@@ -86,7 +86,7 @@ function makeFakeEnv() {
             lowLatencyMode: false,
             outputDeviceId: null,
             inputDeviceId: null,
-            themeId: 'cream',
+            themeId: 'light',
             defaultVelocity: 0.8,
         })),
         updateSettings: vi.fn((patch: Record<string, unknown>) => ({
@@ -97,7 +97,7 @@ function makeFakeEnv() {
                 lowLatencyMode: Boolean(patch.lowLatencyMode),
                 outputDeviceId: null,
                 inputDeviceId: null,
-                themeId: 'cream',
+                themeId: 'light',
                 defaultVelocity: 0.8,
             },
             undo,
@@ -164,7 +164,7 @@ describe('diagnostics/settings tools — pure dispatch (fake env)', () => {
         );
         expect(res.ok).toBe(true);
         expect(res.summary).toContain('48000 Hz');
-        expect(res.summary).toContain('cream');
+        expect(res.summary).toContain('light');
     });
 
     it('applyGetSignal relays the live peak and reports producing sound', async () => {

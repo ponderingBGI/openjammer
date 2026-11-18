@@ -1,31 +1,40 @@
 /**
- * Instrument Visual Node - Compact configuration with per-key ports
+ * Instrument Visual Node — what is inside an instrument: one strip per connected
+ * row, every key of that row exposed as its own socket.
  *
- * Mockup-based redesign:
- * - Each key has its own port (like keyboard node)
- * - Inline header: Note, Octave, Offset, Spread (scroll/click to edit)
- * - Offset values displayed below each port
- * - Pedal section at bottom
+ * This is the node you land on when you press `E` on an instrument, and it is
+ * the reason the instrument can be tuned at all: the row's root note, octave and
+ * offset, the SPREAD between keys, and then the twelve wells that let a player
+ * re-route a single key anywhere.
+ *
+ * Wave 5 / P8 rebuild. It carried 35 literal colours — a fixed cream/ink/blue
+ * palette that stayed cream in every theme — plus its own `EditableValue`, the
+ * fourth private copy of `ValueScrubber` in the app. Both are gone: the card is
+ * a `NodeShell`, the numbers are `ValueScrubber`s, the spread is a real `Knob`
+ * (it is the one continuous value here, and a dial is how an instrument says
+ * so), and every socket is the shared well.
  */
 
-import { useState, useCallback, useRef, memo } from 'react';
-import type { GraphNode, InstrumentRow } from '../../engine/types';
+import { useCallback, useMemo } from 'react';
+import type { GraphNode, InstrumentRow, PortDefinition } from '../../engine/types';
 import { isBasicInstrumentNodeData } from '../../engine/typeGuards';
 import { useGraphStore } from '../../store/graphStore';
-import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
-import { Port } from '@openjammer/oj-ui';
+import { useIsAgentPending } from '../../store/agentSessionStore';
+import { Knob, NodeFrame, NodeShell, Port, PortRow, ValueScrubber } from '@openjammer/oj-ui';
+import { NOTE_NAMES, noteLabelFromDegree } from '../controls/noteNames';
 import './InstrumentVisualNode.css';
 
-/** Debounce interval for wheel events (ms) */
-const WHEEL_DEBOUNCE_MS = 16; // ~60fps
+/** Spread is the only continuous value here: 0 (unison) to 2 (whole tones). */
+const SPREAD_RANGE = { min: 0, max: 2, step: 0.1 } as const;
+const ROW_RANGES = {
+    note: { min: 0, max: 11 },
+    octave: { min: 0, max: 8 },
+    offset: { min: -24, max: 24 },
+} as const;
 
-/** Precision factor for rounding (100 = 2 decimal places) */
-const PRECISION_FACTOR = 100;
-
-const NOTE_DISPLAY = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-// Alias for the shared type guard
-const isValidInstrumentData = isBasicInstrumentNodeData;
+/** Stable empties — a new `{}` or `[]` per render would churn every memo. */
+const EMPTY_DATA: Record<string, never> = {};
+const EMPTY_ROWS: InstrumentRow[] = [];
 
 interface InstrumentVisualNodeProps {
     node: GraphNode;
@@ -42,120 +51,23 @@ interface InstrumentVisualNodeProps {
     style?: React.CSSProperties;
 }
 
-// Editable value component with scroll and click-to-edit
-// Memoized to prevent expensive re-renders
-const EditableValue = memo(function EditableValue({
-    value,
-    label,
-    onChange,
-    min,
-    max,
-    step = 1,
-    displayFn,
-    parseFn,
-    disabled = false
-}: {
-    value: number;
-    label: string;
-    onChange: (v: number) => void;
-    min: number;
-    max: number;
-    step?: number;
-    displayFn?: (v: number) => string;
-    parseFn?: (s: string) => number | null;
-    disabled?: boolean;
-}) {
-    const [editing, setEditing] = useState(false);
-    const [editValue, setEditValue] = useState('');
-    const lastWheelTime = useRef(0);
-    const spanRef = useRef<HTMLSpanElement>(null);
+/** Port handlers, in one place — every socket on this faceplate takes the same set. */
+type SocketWiring = Pick<
+    InstrumentVisualNodeProps,
+    'handlePortMouseDown' | 'handlePortMouseUp' | 'handlePortMouseEnter' | 'handlePortMouseLeave'
+>;
 
-    const display = displayFn ? displayFn(value) : String(value);
-
-    // Handle scroll for value adjustment
-    const handleScroll = useCallback((data: ScrollData) => {
-        if (disabled) return;
-
-        // Debounce rapid wheel events
-        const now = Date.now();
-        if (now - lastWheelTime.current < WHEEL_DEBOUNCE_MS) return;
-        lastWheelTime.current = now;
-
-        // Scroll up increases value, scroll down decreases
-        const delta = data.scrollingUp ? step : -step;
-        const newVal = Math.max(min, Math.min(max, value + delta));
-        // Round to avoid floating point issues (2 decimal places)
-        const rounded = Math.round(newVal * PRECISION_FACTOR) / PRECISION_FACTOR;
-        if (rounded !== value) onChange(rounded);
-    }, [value, onChange, min, max, step, disabled]);
-
-    // Attach scroll capture to the span
-    const { ref: scrollRef } = useScrollCapture<HTMLSpanElement>({
-        onScroll: handleScroll,
-        capture: true, // Block default scroll, handle custom value adjustment
-        enabled: !disabled,
-    });
-
-    const startEdit = useCallback(() => {
-        if (disabled) return;
-        setEditing(true);
-        setEditValue(display);
-    }, [display, disabled]);
-
-    const submitEdit = useCallback(() => {
-        if (parseFn) {
-            const parsed = parseFn(editValue);
-            if (parsed !== null && parsed >= min && parsed <= max) {
-                onChange(parsed);
-            }
-        } else {
-            const parsed = parseFloat(editValue);
-            if (!isNaN(parsed) && parsed >= min && parsed <= max) {
-                onChange(Math.round(parsed * PRECISION_FACTOR) / PRECISION_FACTOR);
-            }
-        }
-        setEditing(false);
-    }, [editValue, parseFn, onChange, min, max]);
-
-    const cancelEdit = useCallback(() => {
-        setEditing(false);
-    }, []);
-
-    // Merge refs for both scroll capture and local operations
-    const mergedRef = useCallback((node: HTMLSpanElement | null) => {
-        (spanRef as React.MutableRefObject<HTMLSpanElement | null>).current = node;
-        scrollRef(node);
-    }, [scrollRef]);
-
-    return (
-        <span
-            ref={mergedRef}
-            className="editable-value"
-            onClick={() => !editing && startEdit()}
-            title={`Scroll or click to edit ${label}`}
-        >
-            {editing ? (
-                <input
-                    type="text"
-                    className="editable-input"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={submitEdit}
-                    onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') submitEdit();
-                        if (e.key === 'Escape') cancelEdit();
-                    }}
-                    autoFocus
-                    onClick={(e) => e.stopPropagation()}
-                />
-            ) : (
-                <span className="editable-display">{display}</span>
-            )}
-            <span className="editable-label">{label}</span>
-        </span>
-    );
-});
+function socketProps(nodeId: string, portId: string, wiring: SocketWiring) {
+    return {
+        'data-node-id': nodeId,
+        'data-port-id': portId,
+        'data-port-type': 'control',
+        onMouseDown: (e: React.MouseEvent) => wiring.handlePortMouseDown?.(portId, e),
+        onMouseUp: (e: React.MouseEvent) => wiring.handlePortMouseUp?.(portId, e),
+        onMouseEnter: () => wiring.handlePortMouseEnter?.(portId),
+        onMouseLeave: wiring.handlePortMouseLeave,
+    };
+}
 
 export function InstrumentVisualNode({
     node,
@@ -169,271 +81,241 @@ export function InstrumentVisualNode({
     handleNodeMouseLeave,
     isSelected,
     isDragging,
-    style
 }: InstrumentVisualNodeProps) {
-    // Use selector pattern to subscribe only to specific node - avoids re-render on any node change
-    const parentNode = useGraphStore((s) => node.parentId ? s.nodes.get(node.parentId) : null);
+    const parentNode = useGraphStore((s) => (node.parentId ? s.nodes.get(node.parentId) : null));
     const updateInstrumentRow = useGraphStore((s) => s.updateInstrumentRow);
+    const isAgentPending = useIsAgentPending(node.id);
     const parentNodeId = parentNode?.id;
 
-    // Handle row field update. Declared before any early return so this hook is
-    // always called in the same order (Rules of Hooks).
-    const handleRowUpdate = useCallback((rowId: string, field: keyof InstrumentRow, value: number) => {
+    const updateRow = useCallback((rowId: string, field: keyof InstrumentRow, value: number) => {
         if (!parentNodeId) return;
         updateInstrumentRow(parentNodeId, rowId, { [field]: value });
     }, [parentNodeId, updateInstrumentRow]);
 
-    // Validate parent node exists and has valid instrument data
-    if (node.parentId && !parentNode) {
-        // Parent was deleted or doesn't exist - show error state
-        return (
-            <div
-                className={`instrument-visual-node compact error ${isSelected ? 'selected' : ''}`}
-                style={style}
-            >
-                <div className="instrument-visual-header compact">
-                    <span className="instrument-visual-title">Error</span>
-                </div>
-                <div className="no-rows-message compact">Parent node not found</div>
-            </div>
-        );
-    }
+    const wiring: SocketWiring = {
+        handlePortMouseDown,
+        handlePortMouseUp,
+        handlePortMouseEnter,
+        handlePortMouseLeave,
+    };
 
-    const parentData = parentNode?.data ?? {};
+    const parentData = parentNode?.data ?? EMPTY_DATA;
+    const valid = isBasicInstrumentNodeData(parentData);
+    // One stable array when there is nothing to show, so the two memos below do
+    // not recompute on every render of an unwired instrument.
+    const rows: InstrumentRow[] = useMemo(
+        () => (isBasicInstrumentNodeData(parentData) ? parentData.rows || EMPTY_ROWS : EMPTY_ROWS),
+        [parentData],
+    );
 
-    // Validate parent data structure
-    if (!isValidInstrumentData(parentData)) {
-        return (
-            <div
-                className={`instrument-visual-node compact error ${isSelected ? 'selected' : ''}`}
-                style={style}
-            >
-                <div className="instrument-visual-header compact">
-                    <span className="instrument-visual-title">Error</span>
-                </div>
-                <div className="no-rows-message compact">Invalid instrument data</div>
-            </div>
-        );
-    }
+    const keyRows = useMemo(() => rows.filter((r) => r.portCount > 1), [rows]);
+    const pedalRows = useMemo(() => rows.filter((r) => r.portCount === 1), [rows]);
 
-    const rows: InstrumentRow[] = parentData.rows || [];
+    // The declared ports. `row-in` is the bundle arriving from the instrument's
+    // own input panel; it used to be advertised and never drawn, which is a port
+    // the canvas can look up but a player cannot see.
+    const rowIn = node.ports.find((p) => p.id === 'row-in');
+    const audioOut = node.ports.find((p) => p.direction === 'output' && p.type === 'audio');
+    const otherOutputs = node.ports.filter(
+        (p) => p.direction === 'output' && p.type !== 'audio',
+    );
 
-    // Get output port for audio out
-    const outputPorts = node.ports.filter(p => p.direction === 'output');
+    const portRow = (port: PortDefinition, label: string, title: string) => (
+        <PortRow
+            key={port.id}
+            side={port.direction}
+            kind={port.type}
+            connected={!!hasConnection?.(port.id)}
+            label={label}
+            title={title}
+            data-node-id={node.id}
+            data-port-id={port.id}
+            data-port-type={port.type}
+            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
+            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
+            onMouseEnter={() => handlePortMouseEnter?.(port.id)}
+            onMouseLeave={handlePortMouseLeave}
+        />
+    );
 
-    // Separate pedal rows from key rows
-    const keyRows = rows.filter(r => r.portCount > 1);
-    const pedalRows = rows.filter(r => r.portCount === 1);
+    // Parent gone, or its data is not an instrument's: say so plainly and keep
+    // the sockets, so the canvas can still find every port it advertises.
+    const fault = !parentNode && node.parentId
+        ? 'Parent instrument not found.'
+        : !valid && parentNode
+            ? 'This node’s instrument data could not be read.'
+            : null;
 
     return (
-        <div
-            className={`instrument-visual-node compact ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
-            style={style}
+        <NodeFrame
+            position={node.position}
+            dragging={!!isDragging}
+            className={`iv-frame${isSelected ? ' is-selected' : ''}`}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
         >
-            {/* Header */}
-            <div
-                className="instrument-visual-header compact"
-                onMouseDown={handleHeaderMouseDown}
+            <NodeShell
+                className="instrument-visual-node"
+                title="Rows"
+                nodeType={fault ? 'UNREADABLE' : `${rows.length} IN`}
+                selected={!!isSelected}
+                dragging={!!isDragging}
+                agentPending={isAgentPending}
+                headerProps={{ onMouseDown: handleHeaderMouseDown }}
+                inputs={rowIn ? [portRow(rowIn, 'ROWS', 'Bundle in from the instrument')] : []}
+                outputs={[
+                    ...(audioOut ? [portRow(audioOut, 'OUT', 'Audio output')] : []),
+                    ...otherOutputs.map((p) => portRow(p, p.name.toUpperCase(), p.name)),
+                ]}
             >
-                <span className="instrument-visual-title">Config</span>
-            </div>
-
-            {/* Rows with individual key ports */}
-            <div className="instrument-rows-compact">
-                {keyRows.length === 0 && pedalRows.length === 0 ? (
-                    <div className="no-rows-message compact">
-                        Connect bundles
-                    </div>
+                {fault ? (
+                    <p className="iv-note">{fault}</p>
+                ) : rows.length === 0 ? (
+                    <p className="iv-note">No rows yet — connect a keyboard row to the instrument.</p>
                 ) : (
-                    <>
+                    <div className="iv-rows">
                         {keyRows.map((row) => (
-                            <RowWithPorts
+                            <RowStrip
                                 key={row.rowId}
                                 row={row}
                                 nodeId={node.id}
-                                onUpdate={(field, value) => handleRowUpdate(row.rowId, field, value)}
-                                handlePortMouseDown={handlePortMouseDown}
-                                handlePortMouseUp={handlePortMouseUp}
-                                handlePortMouseEnter={handlePortMouseEnter}
-                                handlePortMouseLeave={handlePortMouseLeave}
+                                wiring={wiring}
                                 hasConnection={hasConnection}
+                                onUpdate={(field, value) => updateRow(row.rowId, field, value)}
                                 disabled={!parentNodeId}
                             />
                         ))}
 
-                        {/* Pedal section */}
                         {pedalRows.length > 0 && (
-                            <div className="pedal-row-compact">
+                            <div className="iv-pedals">
                                 {pedalRows.map((pedal) => {
-                                    // Pedal port ID matches internal wiring: {rowId}-key-0
-                                    const pedalPortId = `${pedal.rowId}-key-0`;
+                                    // The pedal's port id matches the internal wiring.
+                                    const portId = `${pedal.rowId}-key-0`;
                                     return (
-                                        <div key={pedal.rowId} className="pedal-item">
+                                        <span key={pedal.rowId} className="iv-pedal">
                                             <Port
                                                 kind="control"
                                                 direction="input"
-                                                className="key-port pedal"
-                                                style={{ width: 10, height: 10 }}
-                                                data-node-id={node.id}
-                                                data-port-id={pedalPortId}
-                                                data-port-type="control"
-                                                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(pedalPortId, e)}
-                                                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(pedalPortId, e)}
-                                                onMouseEnter={() => handlePortMouseEnter?.(pedalPortId)}
-                                                onMouseLeave={handlePortMouseLeave}
+                                                connected={!!hasConnection?.(portId)}
+                                                {...socketProps(node.id, portId, wiring)}
                                             />
-                                            <span className="pedal-label">Pedal</span>
-                                        </div>
+                                            <span className="iv-pedal__label">SUSTAIN</span>
+                                        </span>
                                     );
                                 })}
                             </div>
                         )}
-                    </>
+                    </div>
                 )}
-            </div>
-
-            {/* Output port on right */}
-            <div className="output-port-area">
-                {outputPorts.map((port) => (
-                    <Port
-                        key={port.id}
-                        kind="audio"
-                        direction="output"
-                        connected={!!hasConnection?.(port.id)}
-                        className={`visual-port output audio ${hasConnection?.(port.id) ? 'connected' : ''}`}
-                        style={{ width: 14, height: 14 }}
-                        data-node-id={node.id}
-                        data-port-id={port.id}
-                        data-port-type="audio"
-                        onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
-                        onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
-                        onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                        onMouseLeave={handlePortMouseLeave}
-                    />
-                ))}
-            </div>
-        </div>
+            </NodeShell>
+        </NodeFrame>
     );
 }
 
-// Row with individual key ports
-function RowWithPorts({
+// ============================================================================
+// One row: its tuning, then one well per key
+// ============================================================================
+
+function RowStrip({
     row,
     nodeId,
-    onUpdate,
-    handlePortMouseDown,
-    handlePortMouseUp,
-    handlePortMouseEnter,
-    handlePortMouseLeave,
+    wiring,
     hasConnection,
-    disabled
+    onUpdate,
+    disabled,
 }: {
     row: InstrumentRow;
     nodeId: string;
-    onUpdate: (field: keyof InstrumentRow, value: number) => void;
-    handlePortMouseDown?: (portId: string, e: React.MouseEvent) => void;
-    handlePortMouseUp?: (portId: string, e: React.MouseEvent) => void;
-    handlePortMouseEnter?: (portId: string) => void;
-    handlePortMouseLeave?: () => void;
+    wiring: SocketWiring;
     hasConnection?: (portId: string) => boolean;
+    onUpdate: (field: keyof InstrumentRow, value: number) => void;
     disabled: boolean;
 }) {
-    // Generate key ports
-    const keyCount = row.portCount;
-    const keys = Array.from({ length: keyCount }, (_, i) => i);
+    const keys = Array.from({ length: row.portCount }, (_, i) => i);
 
-    // Calculate offset for each key
-    const getKeyOffset = (index: number) => {
-        return row.baseOffset + index * row.spread;
+    /** What key `index` will actually sound — the same arithmetic the engine runs. */
+    const noteAt = (index: number) => {
+        const spreadOffset = row.baseOffset + index * row.spread;
+        return noteLabelFromDegree(
+            row.baseNote + Math.round(spreadOffset),
+            row.baseOctave,
+        );
     };
 
-    // Format offset for display
-    const formatOffset = (offset: number) => {
-        const rounded = Math.round(offset * 10) / 10;
-        return rounded % 1 === 0 ? String(rounded) : rounded.toFixed(1);
+    const snap = (min: number, max: number, step: number) => (next: number) => {
+        if (!Number.isFinite(next)) return next;
+        const snapped = Math.round((next - min) / step) * step + min;
+        return Math.max(min, Math.min(max, Math.round(snapped * 100) / 100));
     };
+
+    const commitNote = snap(ROW_RANGES.note.min, ROW_RANGES.note.max, 1);
+    const commitOctave = snap(ROW_RANGES.octave.min, ROW_RANGES.octave.max, 1);
+    const commitOffset = snap(ROW_RANGES.offset.min, ROW_RANGES.offset.max, 1);
 
     return (
-        <div className="row-compact">
-            {/* Row header with editable values */}
-            <div className="row-header-compact">
-                <EditableValue
-                    value={row.baseNote}
-                    label="Note"
-                    onChange={(v) => onUpdate('baseNote', v)}
-                    min={0}
-                    max={11}
-                    step={1}
-                    displayFn={(v) => NOTE_DISPLAY[v] || 'C'}
-                    parseFn={(s) => {
-                        const idx = NOTE_DISPLAY.findIndex(
-                            n => n.toLowerCase() === s.toLowerCase()
-                        );
-                        return idx !== -1 ? idx : null;
-                    }}
-                    disabled={disabled}
-                />
-                <EditableValue
-                    value={row.baseOctave}
-                    label="Octave"
-                    onChange={(v) => onUpdate('baseOctave', v)}
-                    min={0}
-                    max={8}
-                    step={1}
-                    disabled={disabled}
-                />
-                <EditableValue
-                    value={row.baseOffset}
-                    label="offset"
-                    onChange={(v) => onUpdate('baseOffset', v)}
-                    min={-24}
-                    max={24}
-                    step={1}
-                    displayFn={(v) => v >= 0 ? String(v) : String(v)}
-                    disabled={disabled}
-                />
-                <EditableValue
+        <section className="iv-row" aria-label={row.label || 'Row'}>
+            <header className="iv-row__head">
+                <span className="iv-row__name">{row.label || 'Row'}</span>
+                <span className="iv-row__span">
+                    {noteAt(0)} – {noteAt(row.portCount - 1)}
+                </span>
+            </header>
+
+            <div className="iv-row__tune">
+                <div className="iv-row__values">
+                    <ValueScrubber
+                        label="NOTE"
+                        value={row.baseNote}
+                        display={NOTE_NAMES[row.baseNote] ?? 'C'}
+                        disabled={disabled}
+                        onCommit={(v) => onUpdate('baseNote', commitNote(v))}
+                    />
+                    <ValueScrubber
+                        label="OCT"
+                        value={row.baseOctave}
+                        display={String(row.baseOctave)}
+                        disabled={disabled}
+                        onCommit={(v) => onUpdate('baseOctave', commitOctave(v))}
+                    />
+                    <ValueScrubber
+                        label="OFF"
+                        value={row.baseOffset}
+                        display={row.baseOffset >= 0 ? `+${row.baseOffset}` : String(row.baseOffset)}
+                        disabled={disabled}
+                        onCommit={(v) => onUpdate('baseOffset', commitOffset(v))}
+                    />
+                </div>
+                <Knob
+                    label="SPREAD"
+                    size={40}
+                    min={SPREAD_RANGE.min}
+                    max={SPREAD_RANGE.max}
+                    step={SPREAD_RANGE.step}
                     value={row.spread}
-                    label="Spread"
-                    onChange={(v) => onUpdate('spread', v)}
-                    min={0}
-                    max={2}
-                    step={0.1}
-                    displayFn={(v) => v.toFixed(1)}
+                    defaultValue={0.5}
                     disabled={disabled}
+                    format={(v) => v.toFixed(1)}
+                    onChange={(v) => onUpdate('spread', Math.round(v * 10) / 10)}
                 />
             </div>
 
-            {/* Key ports with offset labels */}
-            <div className="row-keys-compact">
+            <div className="iv-keys">
                 {keys.map((index) => {
                     const portId = `${row.rowId}-key-${index}`;
-                    const offset = getKeyOffset(index);
-                    const isConnected = hasConnection?.(portId) ?? false;
-
                     return (
-                        <div key={index} className="key-column">
+                        <span key={portId} className="iv-key">
                             <Port
                                 kind="control"
                                 direction="input"
-                                connected={isConnected}
-                                className={`key-port ${isConnected ? 'connected' : ''}`}
-                                style={{ width: 10, height: 10 }}
-                                data-node-id={nodeId}
-                                data-port-id={portId}
-                                data-port-type="control"
-                                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(portId, e)}
-                                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(portId, e)}
-                                onMouseEnter={() => handlePortMouseEnter?.(portId)}
-                                onMouseLeave={handlePortMouseLeave}
+                                connected={!!hasConnection?.(portId)}
+                                title={`${noteAt(index)} → ${portId}`}
+                                {...socketProps(nodeId, portId, wiring)}
                             />
-                            <span className="key-offset">{formatOffset(offset)}</span>
-                        </div>
+                            <span className="iv-key__note">{noteAt(index)}</span>
+                        </span>
                     );
                 })}
             </div>
-        </div>
+        </section>
     );
 }

@@ -9,7 +9,7 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.0.0-orange.svg)](package.json)
-[![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
+[![Docs](https://img.shields.io/badge/docs-living%20reference-17a750.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ponderingBGI/openjammer?utm_source=badge)
 
@@ -30,6 +30,24 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 > first launch you may need to allow an unsigned app
 > ([install notes](https://ponderingbgi.github.io/openjammer/play/install/)).
 
+### The first three taps
+
+Opening OpenJammer for the first time asks three questions, one tap each (or the number
+keys `1`–`3`, or `Esc` / **Skip, take me in** to finish with sensible defaults,
+keeping whatever you already answered):
+
+1. **Have you made music with a computer before?** — sets how much the instrument shows
+   you by default. Nothing is ever taken away; it only decides what is in the way.
+2. **What do you want to make right now?** — jam some keys, build a beat, or design a
+   sound. A real rig is wired up for it: actual nodes, actual cables, one `Ctrl+Z` away
+   from gone.
+3. **Light or dark.**
+
+Then you are in, and it is already making sound — press `Q`–`P`, `A`–`L` or `Z`–`/`. In
+the browser that last tap is also what lets audio through (browsers require a click before
+they will play anything). You can re-run the whole thing from **Settings → Graphics → Redo
+setup**. See [docs/shell.md](docs/shell.md) for what each rig is made of.
+
 ---
 
 ## What it is
@@ -47,6 +65,11 @@ beliefs carry the whole project:
   behind one shared contract. When in doubt, it's a plugin — and every user makes it
   their own.
 
+And one guiding star: **build the set on the canvas, bind it to your hands, play without
+looking.** The node canvas is the instrument — simple blocks you put together into
+anything, with your own plugins, samples and loops. Then every knob, pad and button on
+your MIDI hardware can take any control or any verb, and the monitor goes dark.
+
 What you get:
 
 - 🎹 **133 instruments out of the box** — distinct procedural voices (piano, strings,
@@ -62,8 +85,26 @@ What you get:
   automate tracks, record, and export 24-bit WAV or FLAC from the same Song document.
 - 📴 **Offline-capable PWA** — works after first visit, no external API calls.
 
-For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system, the
-"Living Sketchbook," see **[DESIGN.md](DESIGN.md)**.
+## The look
+
+OpenJammer is meant to read as **a real instrument**, not a dashboard. The canvas is a
+calm warm neutral under a faint dot grid; nodes are white cards with hairline edges and
+soft layered depth, and their ports are recessed **socket wells inside the body** — the
+same shape your hand already knows from a patchbay — labelled in small uppercase mono.
+Colour is spent only on signal, state and selection, so the loudest thing on screen is
+always the patch. Controls have weight: buttons compress, knobs resist, keys spring back.
+And **only live audio glows** — cables thicken and brighten with the signal actually
+passing through them, meters read the real level, and nothing else in the interface glows,
+ever.
+
+Two themes ship, **Light** and **Dark**, and they are pure value swaps of the same tokens —
+so a community skin is exactly the same shape as a built-in one. Type is **Outfit** for the
+UI and **JetBrains Mono** for anything exact; UI text never goes below 13px, and both themes
+are held to WCAG contrast floors by a test that reads the token files directly.
+
+For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system in
+full — tokens, components, named rules, and the measured accessibility floors — see
+**[DESIGN.md](DESIGN.md)**.
 
 ## The DAW
 
@@ -106,8 +147,8 @@ For the browser tier, open the printed URL and click **Start OpenJammer**. For t
 tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
 JUCE/CMake build); use `bun native --clap` for CLAP or `bun native --all` for the heavy JUCE
 VST3 path (+ AU on macOS). `bun native --plugins` remains an alias for the JUCE host.
-First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
-Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
+First workflow: right-click the canvas → add a Keyboard node and an Instrument (Keys,
+Strings or Winds), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
 for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
 
 > OpenJammer uses **`bun`** for every package operation — never `npm`, `yarn`, or `pnpm`

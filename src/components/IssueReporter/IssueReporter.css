@@ -1,7 +1,10 @@
-/* IssueReporter — layout glue only. The overlay chrome (scrim/panel/header/
-   close), the fields, the preview block, and the action buttons are all oj-ui
-   primitives (Modal/PanelHeader/Field/Input/Textarea/CodeBlock/Button), which
-   own their tokens. This file is just the body spacing + footer row. */
+/*
+ * IssueReporter — layout glue only. The overlay chrome (scrim / panel / header /
+ * close), the fields, the redaction notice, the preview block and the action
+ * buttons are all oj-ui primitives (Modal / PanelHeader / Field / Input /
+ * Textarea / Callout / CodeBlock / Button), which own their tokens. This file is
+ * the body spacing and the footer row.
+ */
 
 .issue-body {
     display: flex;
@@ -10,19 +13,12 @@
     padding: var(--space-md);
 }
 
-.issue-preview-note {
-    font-family: var(--font-sketch);
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    line-height: 1.4;
-}
-
 .issue-footer {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-top: var(--border-sketch-width) solid var(--sketch-black);
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+    border-top: 1px solid var(--border-subtle);
 }
 
 .issue-footer__spacer {

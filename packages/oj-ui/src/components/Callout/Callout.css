@@ -1,44 +1,30 @@
-/*
- * Callout — a boxed message (DESIGN.md Signal-Not-Brand, Hard-Shadow).
- * Node surface, 2px ink sketch border, hard edges (no blur). The variant
- * accent is confined to the thick left edge and the icon; the surface and
- * title stay neutral so the box reads as a labelled signal, not a brand panel.
- * Styled only via semantic tokens (no literal colors), so it follows the
- * active theme. Title uses --font-sketch (Caveat-Is-the-Voice).
- */
+
 .oj-callout {
     display: flex;
     gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    /* The accent lives here, on the left edge only (Signal-Not-Brand). */
-    border-left-width: var(--space-xs);
-    border-left-color: var(--callout-accent);
-    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    border-radius: 12px;
 }
 
-/* Accent token per variant — referenced by the left border and the icon, and
-   nowhere else. Each maps to a semantic theme color. */
+/* Contrast-safe text token per variant, shared by title and optional icon. */
 .oj-callout--info {
-    --callout-accent: var(--sketch-black);
-    background: var(--bg-node);
+    --callout-accent: var(--text-primary);
 }
 
 .oj-callout--success {
-    --callout-accent: var(--accent-success);
+    --callout-accent: var(--success-ink);
 }
 
 .oj-callout--warning {
-    --callout-accent: var(--accent-warning);
+    --callout-accent: var(--warning-ink);
 }
 
 .oj-callout--danger {
-    --callout-accent: var(--accent-danger);
+    --callout-accent: var(--danger-ink);
 }
 
 .oj-callout--tip {
-    --callout-accent: var(--accent-secondary);
+    --callout-accent: var(--accent-ink);
 }
 
 /* Icon — the only other place the accent shows. Fixed box so the body text
@@ -48,8 +34,8 @@
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    width: var(--text-lg);
-    height: var(--text-lg);
+    width: var(--text-md);
+    height: var(--text-md);
     color: var(--callout-accent);
 }
 
@@ -63,14 +49,13 @@
     min-width: 0;
 }
 
-/* Title stays neutral (Signal-Not-Brand: never a heading in a state color),
-   in the Caveat voice. */
+
 .oj-callout__title {
-    margin-bottom: var(--space-xs);
-    font-family: var(--font-sketch);
+    margin-bottom: 2px;
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--callout-accent);
     line-height: 1.2;
 }
 
@@ -78,5 +63,5 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-secondary);
-    line-height: 1.5;
+    line-height: 1.45;
 }

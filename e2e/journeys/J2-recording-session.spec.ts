@@ -11,8 +11,23 @@ test('@journey J2 Recording Session — count-in, punch, loop takes, newest take
 
     const arm = page.getByRole('button', { name: /Arm .* for MIDI recording/i }).first();
     await arm.click();
-    await page.getByTitle('Count-in: off, 1 bar, or 2 bars').click();
-    await page.getByTitle(/Enable click/).click();
+
+    /*
+     * The click and its count-in are ONE control now: a metronome toggle that
+     * opens a count-in menu on hold or right-click (`TransportPill.tsx`,
+     * MetronomeZone) instead of the old three-state cycler. Address it by
+     * accessible name — `Metronome`, growing a ", N bar count-in" suffix once a
+     * count-in is set — because the title now carries the affordance prose
+     * ("Turn the click on · hold or right-click for count-in").
+     */
+    const transport = page.getByRole('group', { name: 'Transport' });
+    const metronome = transport.getByRole('button', { name: /^Metronome/ });
+    await metronome.click({ button: 'right' });
+    await page.getByRole('menu', { name: 'Count-in' }).getByRole('menuitemradio', { name: '1 bar' }).click();
+    await expect(metronome).toHaveAccessibleName('Metronome, 1 bar count-in');
+    await metronome.click();
+    await expect(metronome).toHaveAttribute('aria-pressed', 'true');
+
     await page.getByTitle(/Enable punch range/).click();
 
     const originalCount = await page.locator('.arrangement-clip').count();

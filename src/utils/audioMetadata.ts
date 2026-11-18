@@ -384,6 +384,22 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * Format a SAMPLE's length the way a clip card, a library row, a sampler slot
+ * and a looper layer all say it: sub-second lengths keep one decimal, anything
+ * longer rounds to whole seconds. Short, exact, and always in mono.
+ *
+ * This is the short voice; {@link formatDuration} is the long one (MM:SS /
+ * HH:MM:SS) used where a running time is being read, not a length compared.
+ * Four faceplates had their own copy of the two lines below and they had already
+ * drifted apart in wording.
+ */
+export function formatSampleDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  if (seconds < 1) return `${seconds.toFixed(1)}s`;
+  return `${Math.round(seconds)}s`;
+}
+
+/**
  * Format file size as human-readable string
  */
 export function formatFileSize(bytes: number): string {

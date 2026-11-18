@@ -10,66 +10,73 @@
     width: 100%;
 }
 
-/* Bundle row layout */
-.bundle-port-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    min-height: 28px;
-}
-
+/* Bundle row layout. The row shape (gap, 24px minimum target, the socket well
+   itself) comes from Nodes/_sockets.css and Port.css — a bundle port is the
+   same socket as every other port, it just stands for several channels. Only
+   the group's own mirroring lives here. */
 .bundle-port-group.left .bundle-port-row {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: 22px minmax(90px, 1fr) auto 18px;
 }
 
 .bundle-port-group.right .bundle-port-row {
     flex-direction: row-reverse;
 }
 
-/* Expand/collapse button */
+/* Expand/collapse button. Deliberately narrower than the 34px icon button: a
+   bundle row is compact, and every pixel the disclosure
+   takes is a pixel the bundle's name and channel count lose. The row's own 24px
+   min-height keeps the target honest vertically. */
 .bundle-expand-button {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    min-width: 0;
     background: none;
     border: none;
-    padding: 2px 4px;
+    padding: 0;
     cursor: pointer;
-    color: var(--text-secondary, #888);
-    font-size: 10px;
+    color: var(--text-muted);
+    font-size: var(--text-micro);
     line-height: 1;
-    border-radius: 3px;
-    transition: background-color 0.15s, color 0.15s;
+    border-radius: var(--radius-sm);
+    transition: background-color var(--motion-fast), color var(--motion-fast);
 }
 
 .bundle-expand-button:hover {
-    background-color: var(--hover-bg, rgba(255, 255, 255, 0.1));
-    color: var(--text-primary, #fff);
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 
 .bundle-triangle {
     display: inline-block;
-    transition: transform 0.15s ease;
+    transition: transform var(--motion-fast);
 }
 
-.bundle-expand-button.expanded .bundle-triangle {
-    /* Triangle already points down for expanded state */
-}
-
-/* Bundle label */
+/* Bundle label — the port-label micro voice, so a bundle reads as one more
+   named socket rather than a different kind of thing. */
 .bundle-label {
-    font-size: 12px;
-    color: var(--text-primary, #fff);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 140px;
+    flex: 1 1 auto;
+    min-width: 90px;
     cursor: default;
     user-select: none;
 }
 
+/* The count remains a compact fact beside the identity. The bundle panel's
+   grid reserves 90px for the name before this chip gets its own column. */
 .bundle-count {
-    color: var(--text-secondary, #888);
-    font-size: 11px;
-    margin-left: 4px;
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    color: var(--text-secondary);
 }
 
 /* Expanded channels container */
@@ -92,12 +99,12 @@
 }
 
 .bundle-channels::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.2));
+    background-color: var(--text-muted);
     border-radius: 3px;
 }
 
 .bundle-channels::-webkit-scrollbar-thumb:hover {
-    background-color: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
+    background-color: var(--text-secondary);
 }
 
 /* Individual channel row */
@@ -107,7 +114,7 @@
     gap: 4px;
     padding: 2px 4px;
     min-height: 20px;
-    font-size: 11px;
+    font-size: var(--text-xs);
 }
 
 .bundle-channel-row.left {
@@ -124,9 +131,9 @@
 }
 
 .bundle-channel-connector {
-    color: var(--text-tertiary, #555);
-    font-family: monospace;
-    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     width: 12px;
     text-align: center;
 }
@@ -141,28 +148,28 @@
     flex: 1;
 }
 
-/* Channel port marker (smaller, visual only) — semantic wiring colors, matching
-   the oj-ui <Port> the real bundle port now uses (no orphan-token fallbacks). */
+/* Channel marker (visual only — the channels inside a bundle are not separate
+   connection targets). A small solid core, not a socket: nothing plugs in here,
+   so it must not look like a well. */
 .bundle-channel-marker {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    border: 1px solid var(--sketch-black);
-    background-color: var(--bg-canvas);
+    background-color: var(--text-muted);
     flex-shrink: 0;
 }
 
 .bundle-channel-marker.control-port {
-    background-color: var(--control-output);
+    background-color: var(--control-connection);
 }
 
 .bundle-channel-marker.audio-port {
-    background-color: var(--audio-output);
+    background-color: var(--audio-connection);
 }
 
 /* Animation for expansion */
 .bundle-port-group.expanded .bundle-channels {
-    animation: slideDown 0.15s ease-out;
+    animation: slideDown 150ms ease-out;
 }
 
 @keyframes slideDown {
@@ -178,7 +185,7 @@
 
 /* Bundle header in expanded state */
 .bundle-port-row.bundle-header {
-    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 4px;
     padding-bottom: 6px;
 }
@@ -186,6 +193,6 @@
 /* Empty slot indicator */
 .bundle-port-group + .empty-slot-indicator {
     margin-top: 8px;
-    border-top: 1px dashed var(--border-color, rgba(255, 255, 255, 0.1));
+    border-top: 1px dashed var(--border-subtle);
     padding-top: 8px;
 }

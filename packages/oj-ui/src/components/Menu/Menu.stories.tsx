@@ -49,6 +49,6 @@ export const ContextMenu: Story = () => (
         <MenuItem label="Reverb" onSelect={() => {}} />
         <MenuItem label="Delay" shortcut="D" onSelect={() => {}} />
         <MenuSeparator />
-        <MenuItem label="Cancel" onSelect={() => {}} />
+        <MenuItem label="Delete node" danger onSelect={() => {}} />
     </Menu>
 );

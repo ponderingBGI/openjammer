@@ -6,7 +6,7 @@
   "branch": "canari",
   "coverage": {
     "components": 53,
-    "withStory": 48,
+    "withStory": 53,
     "withFigma": 53
   },
   "components": [
@@ -78,7 +78,7 @@
       "name": "Field",
       "codePath": "packages/oj-ui/src/components/Field/Field.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Field/Field.tsx",
-      "ladleStoryId": null,
+      "ladleStoryId": "primitives--field--states",
       "figmaNodeId": "8:30",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-30"
     },
@@ -190,7 +190,7 @@
       "name": "Input",
       "codePath": "packages/oj-ui/src/components/Input/Input.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Input/Input.tsx",
-      "ladleStoryId": null,
+      "ladleStoryId": "primitives--input--states",
       "figmaNodeId": "8:10",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-10"
     },
@@ -206,7 +206,7 @@
       "name": "KeyTile",
       "codePath": "packages/oj-ui/src/components/KeyTile/KeyTile.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/KeyTile/KeyTile.tsx",
-      "ladleStoryId": "composites--keytile--pad-grid",
+      "ladleStoryId": "composites--keytile--states",
       "figmaNodeId": "15:14",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=15-14"
     },
@@ -286,7 +286,7 @@
       "name": "NodeShell",
       "codePath": "packages/oj-ui/src/components/NodeShell/NodeShell.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/NodeShell/NodeShell.tsx",
-      "ladleStoryId": null,
+      "ladleStoryId": "composites--nodeshell--states",
       "figmaNodeId": "14:2",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=14-2"
     },
@@ -310,7 +310,7 @@
       "name": "Port",
       "codePath": "packages/oj-ui/src/components/Port/Port.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Port/Port.tsx",
-      "ladleStoryId": null,
+      "ladleStoryId": "primitives--port--states",
       "figmaNodeId": "13:9",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=13-9"
     },
@@ -326,7 +326,7 @@
       "name": "ProgressBar",
       "codePath": "packages/oj-ui/src/components/ProgressBar/ProgressBar.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/ProgressBar/ProgressBar.tsx",
-      "ladleStoryId": "primitives--progressbar--levels",
+      "ladleStoryId": "primitives--progressbar--indeterminate",
       "figmaNodeId": "6:11",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-11"
     },
@@ -342,7 +342,7 @@
       "name": "Select",
       "codePath": "packages/oj-ui/src/components/Select/Select.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Select/Select.tsx",
-      "ladleStoryId": null,
+      "ladleStoryId": "primitives--select--states",
       "figmaNodeId": "8:18",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-18"
     },
@@ -382,7 +382,7 @@
       "name": "Swatch",
       "codePath": "packages/oj-ui/src/components/Swatch/Swatch.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Swatch/Swatch.tsx",
-      "ladleStoryId": "primitives--swatch--gallery",
+      "ladleStoryId": "primitives--swatch--states",
       "figmaNodeId": "6:10",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-10"
     },
@@ -430,7 +430,7 @@
       "name": "WaveformView",
       "codePath": "packages/oj-ui/src/components/WaveformView/WaveformView.tsx",
       "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/WaveformView/WaveformView.tsx",
-      "ladleStoryId": "composites--waveformview--single",
+      "ladleStoryId": "composites--waveformview--states",
       "figmaNodeId": "18:53",
       "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=18-53"
     }

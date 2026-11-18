@@ -44,9 +44,10 @@ describe('default instrument voice', () => {
         expect(getDefaultInstrumentVoice()).toBe(getDefaultInstrumentVoice());
     });
 
-    it('covers the melodic alias instruments + the generic picker, not raw sample nodes', () => {
+    it('covers the three family nodes + the generic picker, not raw sample nodes', () => {
         expect(DEFAULT_VOICE_INSTRUMENTS.has('keys')).toBe(true);
-        expect(DEFAULT_VOICE_INSTRUMENTS.has('piano')).toBe(true);
+        expect(DEFAULT_VOICE_INSTRUMENTS.has('strings')).toBe(true);
+        expect(DEFAULT_VOICE_INSTRUMENTS.has('winds')).toBe(true);
         // The generic `instrument` picker now sounds out of the box: it resolves a
         // voice from the selected `instrumentId` (still overridden the moment a user
         // binds a real sample — the executor skips nodes with a sample binding).

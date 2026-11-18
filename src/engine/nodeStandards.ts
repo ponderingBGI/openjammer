@@ -110,7 +110,7 @@ export const PORT_TEMPLATES = {
     /** Standard audio input (left side, centered) */
     audioIn: {
         id: 'audio-in',
-        name: 'Audio In',
+        name: 'In',
         type: 'audio' as ConnectionType,
         direction: 'input' as const,
         position: { x: 0, y: 0.5 }
@@ -119,7 +119,7 @@ export const PORT_TEMPLATES = {
     /** Standard audio output (right side, centered) */
     audioOut: {
         id: 'audio-out',
-        name: 'Audio Out',
+        name: 'Out',
         type: 'audio' as ConnectionType,
         direction: 'output' as const,
         position: { x: 1, y: 0.5 }

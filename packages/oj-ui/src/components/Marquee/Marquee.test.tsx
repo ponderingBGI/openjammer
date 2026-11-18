@@ -1,12 +1,23 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Marquee } from './Marquee';
 
+const marqueeCss = readFileSync(
+    'packages/oj-ui/src/components/Marquee/Marquee.css',
+    'utf8',
+);
+
 describe('Marquee', () => {
+    it('uses a neutral proposal treatment with no accent token', () => {
+        expect(marqueeCss).toContain('1px dashed var(--border-strong)');
+        expect(marqueeCss).toContain('var(--text-primary) 6%');
+        expect(marqueeCss).not.toContain('var(--accent-primary)');
+    });
     it('renders the base class', () => {
         const { container } = render(<Marquee x={0} y={0} width={10} height={10} />);
         const el = container.querySelector('div')!;
-        expect(el.className).toBe('oj-marquee');
+        expect(el.className).toContain('oj-marquee');
     });
 
     it('positions and sizes from x/y/width/height', () => {

@@ -49,8 +49,9 @@ export function PresenceOverlay() {
                                     top: node.position.y,
                                     width: dims.width,
                                     height: dims.height,
+                                    // The peer's colour is data; the ring geometry
+                                    // is CSS. One 1.5px dashed edge, no halo.
                                     borderColor: peer.color,
-                                    boxShadow: `0 0 0 1px ${peer.color}`,
                                 }}
                             />
                         );
@@ -66,15 +67,26 @@ export function PresenceOverlay() {
                         className="presence-cursor"
                         style={{ left: peer.cursor.x, top: peer.cursor.y }}
                     >
+                        {/* The arrow is filled with the peer's own colour and
+                            outlined with the canvas surface token, so it stays
+                            legible over a node or over the dot grid in either
+                            theme. The outline is CSS, never a literal white. */}
                         <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                             <path
                                 d="M2 2 L2 14 L5.5 10.5 L8 16 L10 15 L7.5 9.5 L13 9.5 Z"
                                 fill={peer.color}
-                                stroke="#fff"
                                 strokeWidth="1"
                             />
                         </svg>
-                        <span className="presence-cursor-label" style={{ background: peer.color }}>
+                        {/* The label is a surface chip with a peer-coloured dot:
+                            a peer picks an arbitrary colour, so text ON it has
+                            unknowable contrast. Text on the surface does not. */}
+                        <span className="presence-cursor-label">
+                            <span
+                                className="presence-cursor-dot"
+                                style={{ background: peer.color }}
+                                aria-hidden="true"
+                            />
                             {peer.name}
                         </span>
                     </div>

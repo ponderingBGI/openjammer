@@ -117,10 +117,10 @@ describe('emitOjGraph — basic shape', () => {
     });
 
     it('is deterministic across runs (same node ids -> same NodeIdx mapping)', () => {
-        const piano = makeNode('piano', { id: 'aaa' });
+        const inst = makeNode('instrument', { id: 'aaa' });
         const speaker = makeNode('speaker', { id: 'bbb' });
-        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const nodes = nodeMap(piano, speaker);
+        const conn = makeConn(inst.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const nodes = nodeMap(inst, speaker);
         const conns = connMap(conn);
         const a = emitOjGraph(nodes, conns);
         const b = emitOjGraph(nodes, conns);
@@ -178,13 +178,13 @@ describe('emitOjGraph — instrument family routing', () => {
     });
 
     it('keeps a piano instrument on the Sampler primitive', () => {
-        const piano = makeNode('instrument', {
+        const inst = makeNode('instrument', {
             id: 'p',
             data: { instrumentId: 'gm-acoustic-grand-piano' },
         });
         const speaker = makeNode('speaker', { id: 's' });
-        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const conn = makeConn(inst.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, speaker), connMap(conn));
         const kinds = graph.nodes.map((n) => n.kind);
         expect(kinds).toContain('Sampler');
         expect(kinds).not.toContain('KarplusString');
@@ -329,7 +329,7 @@ describe('emitOjGraph — multiplier (×) factor_active', () => {
     // zero-filled, not absent), so emit bakes FACTOR_ACTIVE (id 1) from the edges:
     // 1 => multiply the two input signals (VCA), 0 => multiply by the on-node number.
     it('sets factor_active = 0 when only the signal input is connected', () => {
-        const src = makeNode('piano', { id: 'src' });
+        const src = makeNode('instrument', { id: 'src' });
         const mul = makeNode('multiplier', { id: 'mul', data: { factor: 2 } });
         const speaker = makeNode('speaker', { id: 'spk' });
         const a1 = makeConn(src.id, 'audio-out', mul.id, 'in-1', 'audio');
@@ -341,8 +341,8 @@ describe('emitOjGraph — multiplier (×) factor_active', () => {
     });
 
     it('sets factor_active = 1 when the second input is connected (VCA)', () => {
-        const s1 = makeNode('piano', { id: 's1' });
-        const s2 = makeNode('piano', { id: 's2' });
+        const s1 = makeNode('instrument', { id: 's1' });
+        const s2 = makeNode('instrument', { id: 's2' });
         const mul = makeNode('multiplier', { id: 'mul' });
         const speaker = makeNode('speaker', { id: 'spk' });
         const a1 = makeConn(s1.id, 'audio-out', mul.id, 'in-1', 'audio');
@@ -433,12 +433,12 @@ describe('emitOjGraph — effect lowering is data-driven', () => {
 
 describe('emitOjGraph — master output', () => {
     it('synthesizes ONE master for MULTIPLE speakers; real speakers demoted to Passthrough feeding it', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const spk1 = makeNode('speaker', { id: 's1' });
         const spk2 = makeNode('speaker', { id: 's2' });
-        const a1 = makeConn(piano.id, 'audio-out', spk1.id, 'audio-in', 'audio');
-        const a2 = makeConn(piano.id, 'audio-out', spk2.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, spk1, spk2), connMap(a1, a2));
+        const a1 = makeConn(inst.id, 'audio-out', spk1.id, 'audio-in', 'audio');
+        const a2 = makeConn(inst.id, 'audio-out', spk2.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, spk1, spk2), connMap(a1, a2));
 
         // EXACTLY one SpeakerOut master (the synthesized one) — compile requires it.
         const speakerOuts = graph.nodes.filter((n) => n.kind === 'SpeakerOut');
@@ -461,7 +461,7 @@ describe('emitOjGraph — master output', () => {
             (e) => e.to_node === synthIdx && e.kind === 'Audio',
         );
         expect(feedingSynth.length).toBe(2);
-        // And the piano feeds both passthroughs (audio flattens correctly).
+        // And the instrument feeds both passthroughs (audio flattens correctly).
         const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
         const fromSampler = graph.edges.filter(
             (e) => e.from_node === sampler.id && e.kind === 'Audio',
@@ -470,13 +470,13 @@ describe('emitOjGraph — master output', () => {
     });
 
     it('synthesizes a master and routes a speaker-less audio terminal into it', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         // No speaker at all.
-        const graph = emitOjGraph(nodeMap(piano), new Map());
+        const graph = emitOjGraph(nodeMap(inst), new Map());
         const masters = graph.nodes.filter((n) => n.kind === 'SpeakerOut');
         expect(masters).toHaveLength(1);
         expect(masters[0].manifest_id).toBe(SYNTHETIC_MASTER_ID);
-        // The dangling piano (Sampler, has audio out, no audio sink) is routed in.
+        // The dangling instrument (Sampler, has audio out, no audio sink) is routed in.
         const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
         expect(
             graph.edges.some(
@@ -575,9 +575,9 @@ describe('emitOjGraph — hosted plugin nodes (PluginHost)', () => {
 
 describe('emitOjGraph — hierarchy / bundle flattening', () => {
     it('flattens audio THROUGH a container (passthrough) node', () => {
-        // piano -> container(audio-in passthrough) -> speaker, where the
+        // instrument -> container(audio-in passthrough) -> speaker, where the
         // container has an internal canvas-input feeding an internal canvas-output.
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const container = makeNode('container', { id: 'c' });
         const speaker = makeNode('speaker', { id: 's' });
 
@@ -587,9 +587,9 @@ describe('emitOjGraph — hierarchy / bundle flattening', () => {
             { id: 'out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } },
         ];
 
-        const a1 = makeConn(piano.id, 'audio-out', container.id, 'in', 'audio');
+        const a1 = makeConn(inst.id, 'audio-out', container.id, 'in', 'audio');
         const a2 = makeConn(container.id, 'out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, container, speaker), connMap(a1, a2));
+        const graph = emitOjGraph(nodeMap(inst, container, speaker), connMap(a1, a2));
 
         // Container is structural -> no IrNode for it.
         expect(graph.nodes.some((n) => n.manifest_id === manifestIdFor('container'))).toBe(false);
@@ -598,16 +598,16 @@ describe('emitOjGraph — hierarchy / bundle flattening', () => {
     });
 
     it('flattens a multi-hop structural chain (canvas-input -> canvas-output)', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const cin = makeNode('canvas-input', { id: 'cin' });
         const cout = makeNode('canvas-output', { id: 'cout' });
         const speaker = makeNode('speaker', { id: 's' });
 
-        // piano -> canvas-input.out -> canvas-output.in -> speaker
-        const a1 = makeConn(piano.id, 'audio-out', cin.id, 'out', 'audio');
+        // instrument -> canvas-input.out -> canvas-output.in -> speaker
+        const a1 = makeConn(inst.id, 'audio-out', cin.id, 'out', 'audio');
         const a2 = makeConn(cin.id, 'out', cout.id, 'in', 'audio');
         const a3 = makeConn(cout.id, 'in', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, cin, cout, speaker), connMap(a1, a2, a3));
+        const graph = emitOjGraph(nodeMap(inst, cin, cout, speaker), connMap(a1, a2, a3));
 
         expect(graph.nodes.map((n) => n.kind).sort()).toEqual(['Sampler', 'SpeakerOut']);
         expect(hasEdge(graph, 'Sampler', 'SpeakerOut')).toBe(true);
@@ -644,8 +644,8 @@ describe('emitOjGraph — control edges', () => {
 
 describe('emitOjGraph — add node arity', () => {
     it('routes in-1 -> port 0 and in-2 -> port 1 of an Add node', () => {
-        const a = makeNode('piano', { id: 'a' });
-        const b = makeNode('piano', { id: 'b' });
+        const a = makeNode('instrument', { id: 'a' });
+        const b = makeNode('instrument', { id: 'b' });
         const add = makeNode('add', { id: 'add', data: { resolvedType: 'audio' } });
         // Mark the universal ports resolved to audio so they count as audio ports.
         add.ports = add.ports.map((p) => ({ ...p, resolvedType: 'audio' as const }));
@@ -695,11 +695,11 @@ function assertCompileReady(graph: OjGraph): void {
 }
 
 describe('emitOjGraph — compile-readiness invariants', () => {
-    it('a simple piano -> speaker patch is compile-ready', () => {
-        const piano = makeNode('piano', { id: 'p' });
+    it('a simple instrument -> speaker patch is compile-ready', () => {
+        const inst = makeNode('instrument', { id: 'p' });
         const speaker = makeNode('speaker', { id: 's' });
-        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        assertCompileReady(emitOjGraph(nodeMap(piano, speaker), connMap(conn)));
+        const conn = makeConn(inst.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        assertCompileReady(emitOjGraph(nodeMap(inst, speaker), connMap(conn)));
     });
 
     it('the full keyboard->instrument->effect->speaker patch is compile-ready', () => {
@@ -716,12 +716,12 @@ describe('emitOjGraph — compile-readiness invariants', () => {
     });
 
     it('a multi-speaker patch (synthetic master) is compile-ready', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const s1 = makeNode('speaker', { id: 's1' });
         const s2 = makeNode('speaker', { id: 's2' });
-        const a1 = makeConn(piano.id, 'audio-out', s1.id, 'audio-in', 'audio');
-        const a2 = makeConn(piano.id, 'audio-out', s2.id, 'audio-in', 'audio');
-        assertCompileReady(emitOjGraph(nodeMap(piano, s1, s2), connMap(a1, a2)));
+        const a1 = makeConn(inst.id, 'audio-out', s1.id, 'audio-in', 'audio');
+        const a2 = makeConn(inst.id, 'audio-out', s2.id, 'audio-in', 'audio');
+        assertCompileReady(emitOjGraph(nodeMap(inst, s1, s2), connMap(a1, a2)));
     });
 
     it('an empty patch is compile-ready (lone synthetic master)', () => {
@@ -731,12 +731,12 @@ describe('emitOjGraph — compile-readiness invariants', () => {
 
 describe('emitOjGraph — arity', () => {
     it('sources have n_out>=1 and n_in 0; processors 1/1; master 1/0', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const fx = makeNode('effect', { id: 'a' });
         const speaker = makeNode('speaker', { id: 's' });
-        const a1 = makeConn(piano.id, 'audio-out', fx.id, 'audio-in', 'audio');
+        const a1 = makeConn(inst.id, 'audio-out', fx.id, 'audio-in', 'audio');
         const a2 = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, fx, speaker), connMap(a1, a2));
+        const graph = emitOjGraph(nodeMap(inst, fx, speaker), connMap(a1, a2));
 
         const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
         const proc = graph.nodes.find((n) => n.kind === 'Waveshaper')!;
@@ -757,7 +757,7 @@ describe('emitOjGraph — arity', () => {
 
 describe('emitOjGraph — looper inserted between instrument and speaker', () => {
     it('emits a SINGLE clean instrument -> Looper -> SpeakerOut path (no doubled signal)', () => {
-        const inst = makeNode('piano', { id: 'inst' }); // -> Sampler
+        const inst = makeNode('instrument', { id: 'inst' }); // -> Sampler
         const looper = makeNode('looper', { id: 'lp' });
         const speaker = makeNode('speaker', { id: 'spk' });
         const a1 = makeConn(inst.id, 'audio-out', looper.id, 'audio-in', 'audio');
@@ -797,10 +797,10 @@ describe('emitOjGraph — looper inserted between instrument and speaker', () =>
 
 describe('emitOjGraph — speaker master params (reload safety)', () => {
     it('bakes volume AND mute into the SpeakerOut IR (master_param VOLUME=0, MUTE=1)', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const speaker = makeNode('speaker', { id: 's', data: { volume: 0.4, isMuted: true } });
-        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const conn = makeConn(inst.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, speaker), connMap(conn));
 
         const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
         // VOLUME (id 0) carries node.data.volume; MUTE (id 1) carries the coerced
@@ -811,10 +811,10 @@ describe('emitOjGraph — speaker master params (reload safety)', () => {
     });
 
     it('an unmuted speaker bakes mute=0 (no regression)', () => {
-        const piano = makeNode('piano', { id: 'p' });
+        const inst = makeNode('instrument', { id: 'p' });
         const speaker = makeNode('speaker', { id: 's' }); // defaults: volume 1, isMuted false
-        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const conn = makeConn(inst.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, speaker), connMap(conn));
         const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
         expect(spk.params.find((p) => p.id === 0)?.value).toBe(1);
         expect(spk.params.find((p) => p.id === 1)?.value).toBe(0);

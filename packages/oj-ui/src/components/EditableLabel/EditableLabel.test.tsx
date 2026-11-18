@@ -1,6 +1,12 @@
 import { render, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { EditableLabel } from './EditableLabel';
+
+const editableLabelCss = readFileSync(
+    'packages/oj-ui/src/components/EditableLabel/EditableLabel.css',
+    'utf8',
+);
 
 describe('EditableLabel', () => {
     it('rests as a labelled span with the value and base class', () => {
@@ -94,6 +100,34 @@ describe('EditableLabel', () => {
         expect(container.querySelector('input')).not.toBeNull();
     });
 
+    it('suppresses the blur commit that follows Escape in controlled mode', () => {
+        const onCommit = vi.fn();
+        const { container } = render(
+            <EditableLabel value="Bass" editing onCommit={onCommit} />,
+        );
+        const input = container.querySelector('input')!;
+        fireEvent.change(input, { target: { value: 'Discard me' } });
+        fireEvent.keyDown(input, { key: 'Escape' });
+        fireEvent.blur(input);
+        expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it('applies mono consistently and keeps the resting box mounted while editing', () => {
+        const { container } = render(
+            <EditableLabel value="120.0" defaultEditing mono onCommit={() => {}} />,
+        );
+        expect(container.querySelector('.oj-editable-label')!.className).toContain(
+            'oj-editable-label--mono',
+        );
+        expect(container.querySelector('.oj-editable-label__text')).not.toBeNull();
+        expect(container.querySelector('.oj-editable-label__input')!.className).toContain(
+            'oj-input--mono',
+        );
+        expect(editableLabelCss).toMatch(
+            /\.oj-editable-label__input\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/,
+        );
+    });
+
     it('controlled: does not enter edit mode on its own from a double-click', () => {
         const { container } = render(
             <EditableLabel value="Bass" editing={false} onCommit={() => {}} />,
@@ -107,5 +141,16 @@ describe('EditableLabel', () => {
             <EditableLabel value="x" className="mine" onCommit={() => {}} />,
         );
         expect(container.querySelector('.oj-editable-label')!.className).toContain('mine');
+    });
+
+    it('does not enter edit mode while disabled', () => {
+        const { container } = render(
+            <EditableLabel value="Bass" disabled onCommit={() => {}} />,
+        );
+        const text = container.querySelector('.oj-editable-label__text')!;
+        expect(text.getAttribute('aria-disabled')).toBe('true');
+        fireEvent.doubleClick(text);
+        fireEvent.keyDown(text, { key: 'Enter' });
+        expect(container.querySelector('input')).toBeNull();
     });
 });

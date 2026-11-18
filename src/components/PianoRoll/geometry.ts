@@ -22,26 +22,186 @@ export function pitchName(pitch: number): string {
     return `${names[((pitch % 12) + 12) % 12]}${Math.floor(pitch / 12) - 1}`;
 }
 
+/**
+ * Row height: `clamp(6px, fieldHeight / pitchSpan, 22px)` (spec 2.7).
+ *
+ * The floor of 6px is the smallest row a pointer can hit reliably (D18). The
+ * ceiling of 22px is what lets a narrow pitch range FILL the surface instead of
+ * leaving a third of it blank under the notes — at the old 16px cap the full
+ * piano roll drew a short block of rows floating above dead space, which reads
+ * as a rendering failure rather than as a two-octave part.
+ */
 export function pitchRowHeight(fieldHeight: number, range: PitchRange, drumMode: boolean): number {
     if (drumMode) return DRUM_ROW_HEIGHT;
-    return Math.max(3, Math.min(16, fieldHeight / Math.max(12, range.hi - range.lo + 1)));
+    return Math.max(6, Math.min(22, fieldHeight / Math.max(12, range.hi - range.lo + 1)));
 }
 
+/**
+ * Velocity → the alpha the note is painted at.
+ *
+ * The floor is **0.68**, not 0.45. A note is the primary object of this editor,
+ * so WCAG 1.4.11's 3:1 applies to the quietest one, not just the loudest — and
+ * at 0.45 the softest note measured **1.65:1** against a white-key row and
+ * 1.63:1 against a black-key one (W4-TB-REVIEW M4, canvas-resolved).
+ *
+ * Raising the floor alone could not close it: `--universal-connection` at FULL
+ * opacity is only 3.35:1 on white, so every velocity below maximum would still
+ * have failed. The colour had to move too — see `--piano-roll-note-ink` in
+ * `PianoRoll.css`. The two are a pair; `contrast.test.ts` measures the
+ * composite of both and will fail if either drifts.
+ *
+ * Monotonic, and still exactly 1 at velocity 127, so the loudest note is the
+ * densest ink on the surface.
+ */
 export function velocityOpacity(velocity = 96): number {
-    return 0.45 + 0.55 * Math.max(0, Math.min(127, velocity)) / 127;
+    return 0.68 + 0.32 * Math.max(0, Math.min(127, velocity)) / 127;
 }
 
-export function shouldAutoDetectDrums(notes: readonly ArrangementNote[]): boolean {
-    const pitches = new Set(notes.map((note) => note.pitch));
-    return pitches.size > 0 && pitches.size <= 16 && [...pitches].every((pitch) => pitch >= 35 && pitch <= 81);
+/**
+ * The General MIDI percussion map, as this app actually knows it.
+ *
+ * It lives HERE, beside the predicate that reads it, and `PianoRoll` imports it
+ * for the key gutter — one map, one meaning. It used to be declared privately in
+ * `PianoRoll.tsx`, which is how the roll came to label a pitch `Ride` while the
+ * predicate that put it in drum mode had never looked at this map at all.
+ */
+export const GM_DRUM_NAMES: Readonly<Record<number, string>> = {
+    35: 'Kick', 36: 'Kick', 37: 'Side stick', 38: 'Snare', 39: 'Clap', 40: 'Snare',
+    41: 'Low tom', 42: 'Closed HH', 43: 'Low tom', 44: 'Pedal HH', 45: 'Mid tom',
+    46: 'Open HH', 47: 'Mid tom', 48: 'High tom', 49: 'Crash', 50: 'High tom',
+    51: 'Ride', 52: 'China', 53: 'Ride bell', 54: 'Tambourine', 55: 'Splash',
+    56: 'Cowbell', 57: 'Crash', 59: 'Ride', 60: 'High bongo', 61: 'Low bongo',
+};
+
+/** Quarter-note ticks, matching `ojproto::PPQ`. Only a default — a caller with a
+ *  real arrangement passes its own. */
+const DEFAULT_PPQ = 960;
+
+/**
+ * The longest a note may be and still read as a HIT rather than a pitch: a
+ * sixteenth. A drum is struck, not held, so length carries no musical meaning on
+ * a kit and drum mode is free to draw every note as one 10px diamond. That is
+ * exactly why guessing wrong is expensive: a melodic part opened as drums loses
+ * the difference between a 480-tick note and a 60-tick one, and gets a key gutter
+ * full of `Ride` and `Cowbell` for pitches the player hears as chords.
+ */
+const HIT_TICKS = DEFAULT_PPQ / 4;
+
+/** Words a human or an importer writes when the track IS a kit. */
+const KIT_WORDS = /\b(drum|drums|kit|perc|percussion|beat|beats|groove)\b/i;
+
+/**
+ * What a caller can tell the predicate about the track, beyond its notes.
+ *
+ * These are the only kit DECLARATIONS this codebase can actually make. There is
+ * no channel on an `ArrangementNote` — `{ id, tick, durTick, pitch, vel }` is the
+ * whole shape — so "channel 10" is not a signal we have, and pretending otherwise
+ * would be the same guess in a smarter costume.
+ */
+export interface DrumDetectionContext {
+    /** The bound instrument's registry `category` is `percussion`. The one
+     *  unambiguous statement in the system: the player picked a kit. */
+    instrumentIsPercussion?: boolean;
+    /** The track's name, as the player typed it or an importer wrote it. */
+    trackName?: string;
+    /** The bound instrument's id, e.g. `gm-standard-kit`. */
+    instrumentId?: string;
+    /** The arrangement's tick resolution, when the caller has one. */
+    ppq?: number;
 }
+
+/**
+ * Does this clip open as a drum grid?
+ *
+ * The old rule was `pitches.size <= 16 && every pitch in [35, 81]` — which is
+ * MOST TONAL MUSIC. The shipped starter's "Nylon Chords" (a four-note karplus
+ * arpeggio in A minor) matched it, so the first clip a new player ever opened
+ * rendered as duration-less diamonds beside a gutter reading
+ * `D5 · C♯5 · … · Low bongo · Ride · Cowbell`. Pre-existing, but the New DNA roll,
+ * the new inline roll and the new starter together put it on the first-run path.
+ *
+ * So the rule now needs a DRUM-KIT SIGNAL, in descending order of how much the
+ * system actually knows:
+ *
+ *  1. **The instrument is a kit.** `instrumentIsPercussion` — a fact, not a guess.
+ *  2. **Someone said so in a name.** A track or instrument called `Drums`, `Kit`,
+ *     `Perc`, `Groove`. Weak evidence, but it is evidence; a hash of pitches is not.
+ *  3. **The material has the shape of a kit and NOTHING else.** Few distinct
+ *     pitches, every one of them named in {@link GM_DRUM_NAMES} (not merely inside
+ *     a 47-semitone window), and not one sustained note. A single held note is
+ *     enough to disqualify: things you hold are pitches.
+ *
+ * Ties go to melodic on purpose. Opening a kit in melodic mode costs one click of
+ * the `Drums` toggle; opening a song in drum mode misnames every row and throws
+ * away every duration on screen.
+ */
+export function shouldAutoDetectDrums(
+    notes: readonly ArrangementNote[],
+    context: DrumDetectionContext = {},
+): boolean {
+    if (notes.length === 0) return false;
+    if (context.instrumentIsPercussion) return true;
+    if (KIT_WORDS.test(context.trackName ?? '') || KIT_WORDS.test(context.instrumentId ?? '')) return true;
+
+    const pitches = new Set(notes.map((note) => note.pitch));
+    if (pitches.size > 16) return false;
+    if (![...pitches].every((pitch) => pitch in GM_DRUM_NAMES)) return false;
+    const hitTicks = context.ppq ? context.ppq / 4 : HIT_TICKS;
+    return notes.every((note) => note.durTick <= hitTicks);
+}
+
+/**
+ * The smallest note the resize edges are offered on (HA-18).
+ *
+ * `10` used to be an EXCLUSIVE floor (`width <= 10 → null`), so a note exactly
+ * ten pixels wide — the width one `Ctrl+wheel` notch produced from the inline
+ * roll's opening zoom — was still un-trimmable, and the player's only feedback
+ * was a cursor that never changed. Ten pixels is enough for a 4px zone at each
+ * end with two clear pixels of body between them, so ten pixels is where the
+ * edges START working, not where they stop.
+ */
+export const MIN_RESIZE_EDGE_WIDTH_PX = 10;
 
 export function resizeEdge(pointerX: number, width: number): 'start' | 'end' | null {
-    if (width <= 10) return null;
+    if (width < MIN_RESIZE_EDGE_WIDTH_PX) return null;
     const zone = Math.min(8, width / 2 - 1);
     if (pointerX <= zone) return 'start';
     if (pointerX >= width - zone) return 'end';
     return null;
+}
+
+/**
+ * The narrowest note the inline roll is allowed to OPEN on (HA-18).
+ *
+ * The inline lane inherited the Song's `pxPerTick`, where a half-beat note is
+ * 4.8 x 6.2px: below the resize floor, so it could be moved but never trimmed,
+ * and the only zoom was a `Ctrl+wheel` advertised nowhere. A half beat is the
+ * shortest note most parts are actually built from, so that is the unit the
+ * opening zoom is measured in — 24px of it, which is a comfortable grab with two
+ * 8px edge zones and 8px of body left between them.
+ */
+export const INLINE_MIN_HALF_BEAT_PX = 24;
+
+/** The `pxPerTick` at which a half-beat note is {@link INLINE_MIN_HALF_BEAT_PX} wide. */
+export function inlineOpeningPxPerTick(ppq: number): number {
+    return INLINE_MIN_HALF_BEAT_PX / Math.max(1, ppq / 2);
+}
+
+/**
+ * The axis the FULL roll surface opens on (HA-18 / F4).
+ *
+ * The surface used to inherit whatever the Song was zoomed to — on the shipped
+ * starter 0.0101px/tick, so pressing `E` opened 128 notes at 4.8px: under
+ * `resizeEdge`'s floor, movable and not trimmable, which is HA-18's symptom
+ * surviving on the surface the `E` key opens. Opening FITTED is the answer a DAW
+ * gives: the clip you asked to edit fills the field. The floor is the lane's, so
+ * a sixty-bar clip still opens with grabbable notes instead of a hairline comb,
+ * and it never goes below the Song's own axis — a player already zoomed past the
+ * floor keeps their scale.
+ */
+export function surfaceOpeningPxPerTick(fieldWidth: number, clipLengthTick: number, ppq: number, songPxPerTick: number): number {
+    const fitted = clipLengthTick > 0 ? fieldWidth / clipLengthTick : 0;
+    return Math.max(fitted, inlineOpeningPxPerTick(ppq), songPxPerTick);
 }
 
 export function clippedNoteGeometry(

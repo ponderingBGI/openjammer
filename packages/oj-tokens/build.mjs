@@ -4,12 +4,20 @@
  *
  *   dist/variables.css         the theme-invariant primitives, on :root
  *   src/generated/themes.ts    the per-theme color registry (typed)
- *   ../oj-ui/oj-tokens.css      the default (cream) theme as a STATIC :root block
+ *   ../oj-ui/oj-tokens.css      the default (light) theme as a STATIC :root block
  *                              (primitives + semantic colors) — design-sync's
  *                              preview cards render statically, so they need the
  *                              colors applyTheme would otherwise inject at runtime.
  *                              Emitting it here keeps `bun run tokens` the single
  *                              source for every token artifact (no manual step → no drift).
+ *   public/download/oj-tokens.css        BOTH themes as a static sheet, gated by
+ *   apps/docs/src/styles/oj-tokens.css   `prefers-color-scheme` AND `[data-theme]`.
+ *                              The two web surfaces have no React and therefore no
+ *                              applyTheme(); they used to be transcribed by a
+ *                              hand-run scratch script, which is a second copy of
+ *                              the palette. One renderer now, in `staticSheet.mjs`,
+ *                              called from here and asserted byte-for-byte by
+ *                              `src/components/__tests__/webSurfaceTokens.test.ts`.
  *
  * Run via the repo root: `bun run tokens`. Output is deterministic (no
  * timestamps), so CI can drift-guard it with `git diff --exit-code`.
@@ -23,15 +31,15 @@ import StyleDictionary from 'style-dictionary';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { renderStaticTokenSheet, STATIC_TOKEN_SHEETS } from './staticSheet.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const r = (...p) => join(__dirname, ...p);
 
 /** id -> human name. Order here is the order themes appear in the UI picker. */
 const THEMES = [
-    { id: 'cream', name: 'Cream' },
-    { id: 'cyberpunk', name: 'Cyberpunk' },
-    { id: 'midnight', name: 'Midnight Blue' },
+    { id: 'light', name: 'Light' },
+    { id: 'dark', name: 'Dark' },
 ];
 
 const CSS_HEADER =
@@ -116,25 +124,38 @@ await fs.writeFile(r('src/generated/themes.ts'), ts, 'utf8');
 // 3) Design-sync static snapshot -> ../oj-ui/oj-tokens.css -------------------
 // The semantic colors are applied at runtime by applyTheme, so they live in no
 // static stylesheet. design-sync's preview cards render statically and need them,
-// so emit the default (cream) theme's colors as a :root block appended to the
+// so emit the default (light) theme's values as a :root block appended to the
 // primitives. Regenerated here so a single `bun run tokens` keeps it in lockstep
 // with the rest — the CI drift guard then makes a stale snapshot impossible.
 const camelToKebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-const creamRoot =
+const lightRoot =
     ':root {\n' +
-    Object.entries(themeColors.cream)
+    Object.entries(themeColors.light)
         .map(([k, v]) => `    --${camelToKebab(k)}: ${v};`)
         .join('\n') +
     '\n}\n';
 const ojTokensCss =
     CSS_HEADER +
     css.trimStart().trimEnd() +
-    '\n\n/* Default "cream" theme semantic colors as a static :root block — the app\n' +
+    '\n\n/* Default "light" theme semantic values as a static :root block — the app\n' +
     '   applies these at runtime via applyTheme; design-sync preview cards need them\n' +
     '   statically (wired via cfg.cssEntry). */\n' +
-    creamRoot;
+    lightRoot;
 await fs.writeFile(r('../oj-ui/oj-tokens.css'), ojTokensCss, 'utf8');
 
+// 4) The two static web surfaces -> their own two-theme sheets ---------------
+// They have no applyTheme(), so they carry the whole palette twice over, once
+// per selection mechanism. One renderer, imported by the drift test as well.
+const primitives = css.trimStart().trimEnd();
+for (const { path, surface } of STATIC_TOKEN_SHEETS) {
+    await fs.writeFile(
+        r('../..', path),
+        renderStaticTokenSheet(surface, primitives, themeColors.light, themeColors.dark),
+        'utf8',
+    );
+}
+
 console.log(
-    `oj-tokens: built dist/variables.css, src/generated/themes.ts, oj-ui/oj-tokens.css (${THEMES.length} themes)`,
+    `oj-tokens: built dist/variables.css, src/generated/themes.ts, oj-ui/oj-tokens.css` +
+        ` and ${STATIC_TOKEN_SHEETS.length} static web-surface sheets (${THEMES.length} themes)`,
 );

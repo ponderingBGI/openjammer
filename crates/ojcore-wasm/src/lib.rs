@@ -190,6 +190,16 @@ struct Host {
     /// Sampler node carrying an [`ojproto::AssetRef`] plays its PCM because
     /// [`load_graph`] compiles through [`compile_with_assets`] over this store.
     assets: WasmAssetStore,
+    /// The `(transport epoch, frame)` pair this host last handed to the UI, so an
+    /// unchanged transport is not re-sent — but a COMMAND always is answered.
+    /// See [`drain_transport`].
+    ///
+    /// Deliberately NOT cleared by [`load_graph`]: the transport is not owned by
+    /// the program (`Engine::install` carries the playhead across a swap), so a
+    /// graph push must not manufacture a redundant "I am Stopped" frame — which
+    /// would land right in the window between an optimistic Play and the engine
+    /// draining the command, and tell the UI it had stopped.
+    last_transport: Option<(u64, EngineFrame)>,
     /// Render quantum the worklet uses (frames per [`process`] call).
     block_size: usize,
     /// Sample rate the engine compiles graphs against.
@@ -326,6 +336,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         out_buf: vec![0.0f32; OUT_CHANNELS * block_size],
         cmd_scratch: vec![0u8; CMD_FRAME_MAX],
         assets,
+        last_transport: None,
         block_size,
         sample_rate,
         tempo_map: default_tempo_map(sample_rate),
@@ -741,6 +752,67 @@ pub fn drain_meters() -> Vec<f32> {
     out.push(master_id as f32);
     out.push(master_peak);
     out
+}
+
+// --- Transport return path (UX-1A / D1) ---------------------------------------
+
+/// Drain the engine's authoritative transport snapshot as the JSON
+/// [`ojproto::EngineFrame::Transport`] — **the same frame** the native tier
+/// pushes onto its `std`-only meter ring, produced by the **same** single
+/// assembler (`ojcore::Engine::transport_frame`). Two encodings of one contract,
+/// not a second transport protocol: native encodes it into
+/// `meter::return_frame::encode_transport`, the worklet ships this JSON straight
+/// through the `transport` postMessage the executor already parses.
+///
+/// **This is the browser tier's only way to ACKNOWLEDGE a transport command.**
+/// Without it `arrangementStore`'s 1500 ms `armPendingTransportTimeout` fires on
+/// every Play and the player is told "the audio engine did not acknowledge the
+/// transport command" — while the engine was in fact rolling perfectly. It is
+/// therefore UNGATED by metering (a meter toggle must never be able to silence
+/// the transport), exactly like the looper return path.
+///
+/// The wasm tier has no return-frame ring (those are `std`-only), so this reads
+/// the engine directly — exactly how [`drain_meters`] reads `meters_mut`. Called
+/// by the worklet every 4 render quanta — every ~10 ms, i.e. **~94x/s** at
+/// 48 kHz / 128 — not per block.
+#[wasm_bindgen]
+pub fn drain_transport() -> Vec<u8> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    let epoch = host.engine.transport_epoch();
+    let frame = host.engine.transport_frame_now();
+
+    // Speak when there is something to say — where "something" is EITHER a new
+    // state OR a command heard.
+    //
+    // Suppressing an unchanged frame matters: a parked transport produces a
+    // byte-identical frame every drain, and re-sending it ~94x/s would be a `Vec`
+    // + a JSON serialisation on the RENDER thread to say nothing happened
+    // (covenant #6/#9), plus a stream of authoritative "I am Stopped" frames
+    // racing every optimistic UI state during the ~40 ms it takes the audio
+    // thread to drain a `TransportPlay`.
+    //
+    // But state alone is not an acknowledgement. A `Seek` onto the sample we are
+    // already parked at — press Home at bar 1 — changes nothing observable, so a
+    // change-only rule stayed silent and `armPendingTransportTimeout` told the
+    // player "the audio engine did not acknowledge the transport command": the
+    // exact sentence this whole path exists to delete. The epoch is the engine
+    // saying "I heard you", independent of whether there was anything to do.
+    //
+    // Rolling advances `sample` every drain, so playback still reports at the
+    // full cadence.
+    // Compared by reference, never by cloning: `EngineFrame` carries a `String`
+    // in its `Error` variant, so a clone here would be a heap allocation on the
+    // render thread for a pure equality test.
+    if matches!(&host.last_transport, Some((seen, last)) if *seen == epoch && last == &frame) {
+        return Vec::new();
+    }
+    let bytes = serde_json::to_vec(&frame).unwrap_or_default();
+    if !bytes.is_empty() {
+        host.last_transport = Some((epoch, frame));
+    }
+    bytes
 }
 
 // --- Looper transport (Stage 2): return path back to the UI -------------------
@@ -1686,5 +1758,124 @@ mod tests {
             out.iter().take(64).all(|s| (*s - 0.5).abs() < 1e-6),
             "injected mic block must flow to the master output"
         );
+    }
+
+    /// UX-1A / D1: the transport frame the worklet posts is the SAME
+    /// [`ojproto::EngineFrame::Transport`] the native tier publishes, serialised
+    /// with the same externally-tagged serde shape `ojcore-processor.ts` parses:
+    /// `{"Transport": { sample, tick, bar, beat, phase, motion, rec, loop_on }}`.
+    ///
+    /// If this shape drifts, the browser tier stops acknowledging transport
+    /// commands and every Play tells the player the engine did not answer.
+    #[test]
+    fn transport_frame_serialises_to_the_shape_the_worklet_parses() {
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        let store = WasmAssetStore::default();
+        let boot = bootstrap_graph(48_000, 128);
+        let program = compile_with_assets(&boot, &reg, &store).expect("bootstrap compiles");
+        let mut engine = Engine::new(program);
+
+        // This is verbatim what `drain_transport` does with the host's engine.
+        let bytes = serde_json::to_vec(&engine.transport_frame_now()).expect("encode");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("decode");
+
+        let t = json
+            .get("Transport")
+            .expect("externally-tagged `Transport` key the worklet checks for");
+        for field in [
+            "sample", "tick", "bar", "beat", "phase", "motion", "rec", "loop_on",
+        ] {
+            assert!(
+                t.get(field).is_some(),
+                "transport frame is missing `{field}`"
+            );
+        }
+        assert_eq!(t["motion"], 0, "a fresh engine reports Motion::Stopped");
+    }
+
+    /// End-to-end over the REAL export, including its "speak only when something
+    /// changed" rule.
+    ///
+    /// A parked transport yields a byte-identical frame every drain. Re-sending
+    /// it means a `Vec` + a JSON serialisation on the render thread ~94x/s to say
+    /// nothing happened, and a stream of authoritative "I am Stopped" frames that
+    /// contradicts any optimistic UI state whose command has not been drained
+    /// yet. So: first drain speaks, an unchanged second drain is silent, and
+    /// anything that MOVES the transport speaks again.
+    ///
+    /// This is the ONLY test that touches the global `HOST`, so it owns that
+    /// state outright and cannot race a sibling.
+    #[test]
+    fn drain_transport_speaks_on_change_or_on_command_never_otherwise() {
+        assert!(
+            drain_transport().is_empty(),
+            "before init there is no engine, and asking is not a trap"
+        );
+
+        init(48_000, 128);
+
+        let first = drain_transport();
+        assert!(
+            !first.is_empty(),
+            "the first drain always states the transport"
+        );
+        let decoded: serde_json::Value = serde_json::from_slice(&first).expect("decode");
+        assert!(decoded.get("Transport").is_some());
+
+        assert!(
+            drain_transport().is_empty(),
+            "a parked, unchanged transport says nothing a second time"
+        );
+
+        // Roll it: the position now advances, so every drain has news.
+        let host = host_mut().expect("host");
+        host.engine.apply_rt(RtCommand::TransportPlay);
+        let mut out = vec![0.0f32; 128];
+        host.engine.process_block(&mut out, 128);
+
+        let rolling = drain_transport();
+        assert!(!rolling.is_empty(), "a moving transport reports");
+        let value: serde_json::Value = serde_json::from_slice(&rolling).expect("decode");
+        assert_eq!(
+            value["Transport"]["motion"], 1,
+            "and it reports Rolling, which is the acknowledgement the UI waits for"
+        );
+
+        // F1: a transport COMMAND is always answered, even when it changes nothing.
+        // Drain to quiescence first, then seek to where we already are — the frame
+        // is byte-identical, so a change-only rule would go silent here and the UI
+        // would time out with "the audio engine did not acknowledge the transport
+        // command". That is Home-at-bar-1, one keystroke away.
+        host_mut()
+            .expect("host")
+            .engine
+            .apply_rt(RtCommand::Seek { samples: 0 });
+        let _ = drain_transport();
+        assert!(
+            drain_transport().is_empty(),
+            "quiescent again after the seek is reported"
+        );
+
+        let parked = host_mut().expect("host").engine.transport_frame_now();
+        host_mut()
+            .expect("host")
+            .engine
+            .apply_rt(RtCommand::Seek { samples: 0 });
+        let ack = drain_transport();
+        assert!(
+            !ack.is_empty(),
+            "a no-op Seek MUST still be acknowledged — the epoch moved even though              the frame did not"
+        );
+        assert_eq!(
+            host_mut().expect("host").engine.transport_frame_now(),
+            parked,
+            "and the frame really is unchanged, which is the whole point"
+        );
+
+        // Leave the global as we found it so nothing later inherits a live engine.
+        unsafe {
+            HOST = None;
+        }
     }
 }

@@ -5,7 +5,7 @@ export default { title: 'Primitives/Surface' };
 
 const demoStyle = {
     padding: 'var(--space-md)',
-    fontFamily: 'var(--font-sketch)',
+    fontFamily: 'var(--font-sans)',
     color: 'var(--text-primary)',
     minWidth: '160px',
 };
@@ -20,14 +20,11 @@ export const Elevations: Story = () => (
             padding: 'var(--space-lg)',
         }}
     >
-        <Surface elevation="rest" style={demoStyle}>
-            Rest
+        <Surface elevation="raised" style={demoStyle}>
+            Raised
         </Surface>
-        <Surface elevation="menu" style={demoStyle}>
-            Menu
-        </Surface>
-        <Surface elevation="lifted" style={demoStyle}>
-            Lifted
+        <Surface elevation="overlay" style={demoStyle}>
+            Overlay
         </Surface>
     </div>
 );

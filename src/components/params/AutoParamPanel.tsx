@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Input, ParamRow } from '@openjammer/oj-ui';
+import { Button, Input, Knob, ParamRow } from '@openjammer/oj-ui';
 import type { GraphNode, NodeData } from '../../engine/types';
 import type { ParamDecl, PluginManifest } from '../../engine/manifest';
 import { HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
@@ -15,6 +15,15 @@ function stepFor(param: ParamDecl): number {
     const raw = span / 100;
     return 10 ** Math.floor(Math.log10(raw));
 }
+
+/**
+ * Above this many parameters the panel is a TABLE and rows are the right shape:
+ * a hosted plugin with sixty controls needs a scannable list, not sixty dials.
+ * At or below it the node is an instrument and deserves to look like one, so the
+ * controls become real `Knob`s — the thing that makes a node read as something
+ * you play rather than something you configure.
+ */
+const KNOB_LIMIT = 6;
 
 function displayName(param: ParamDecl): string {
     const parts = param.module?.split('/').filter(Boolean) ?? [];
@@ -55,6 +64,29 @@ export function AutoParamPanel({ node, manifest }: { node: GraphNode; manifest: 
     const [closedGroups, setClosedGroups] = useState<Set<string>>(() => new Set(manifest.params.length > 24 ? groupParams(manifest.params).slice(1).map((group) => group.name) : []));
     const params = useMemo(() => manifest.params.filter((param) => !param.hidden && `${param.name} ${param.module ?? ''}`.toLowerCase().includes(query.toLowerCase())), [manifest.params, query]);
     const shownPinned = seededParamIds(pinned, touched).map((id) => manifest.params.find((param) => param.id === id)).filter((param): param is ParamDecl => Boolean(param));
+    const asKnobs = manifest.params.filter((param) => !param.hidden && !param.readOnly).length <= KNOB_LIMIT;
+
+    const dial = (param: ParamDecl) => {
+        const stored = data[param.name];
+        const value = typeof stored === 'number' && Number.isFinite(stored) ? stored : param.default;
+        // Frequencies want a log sweep; everything else is linear. A cutoff knob
+        // that crawls at the bottom and leaps at the top is a knob that lies.
+        const log = param.min > 0 && param.max / param.min >= 100;
+        return <Knob
+            key={`knob:${param.id}`}
+            label={displayName(param)}
+            value={value}
+            min={param.min}
+            max={param.max}
+            log={log}
+            defaultValue={param.default}
+            disabled={param.readOnly}
+            format={(next) => formatParamValue(next, param.valueText)}
+            onChange={(next) => { if (Number.isFinite(next)) updateNodeData<NodeData>(node.id, { [param.name]: next, touchedParams: [...touched.filter((id) => id !== param.id), param.id].slice(-4) }); }}
+            onCommit={() => endGesture()}
+            onPointerDown={() => beginGesture()}
+        />;
+    };
 
     const row = (param: ParamDecl, inPinned = false) => {
         const stored = data[param.name];
@@ -63,12 +95,18 @@ export function AutoParamPanel({ node, manifest }: { node: GraphNode; manifest: 
         return <ParamRow key={`${inPinned ? 'pin' : 'all'}:${param.id}`} label={label} value={value} valueText={formatParamValue(value, param.valueText)} min={param.min} max={param.max} step={stepFor(param)} readOnly={param.readOnly} pinned={pinned.includes(param.id)} onLabelClick={() => updateNodeData<NodeData>(node.id, { pinnedParams: togglePinnedParam(pinned, param.id) })} onGestureStart={beginGesture} onGestureEnd={endGesture} onChange={(next) => { if (!Number.isFinite(next)) return; updateNodeData<NodeData>(node.id, { [param.name]: next, touchedParams: [...touched.filter((id) => id !== param.id), param.id].slice(-4) }); }} />;
     };
 
-    return <div className="auto-param-panel">
+    // A handful of parameters is an instrument FACE — real dials, sitting inside
+    // the node's own body padding. Above KNOB_LIMIT it is a TABLE, and a table
+    // wants the full width of the card, its own scroller and a footer, so it
+    // bleeds out to the card edges instead.
+    return <div className={asKnobs ? 'auto-param-panel auto-param-panel--dials' : 'auto-param-panel auto-param-panel--table'}>
         {descriptor && <div className="auto-param-panel__window"><span>{descriptor.vendor}</span><WindowGlyph node={node} descriptor={descriptor} /></div>}
         {manifest.params.length > 24 && <Input aria-label="Filter parameters" placeholder="filter parameters" value={query} onChange={(event) => setQuery(event.target.value)} />}
         <div className="auto-param-panel__scroll">
             {manifest.params.length > 24 && <section className="auto-param-panel__pinned"><h3>Pinned</h3>{shownPinned.length ? shownPinned.map((param) => row(param, true)) : <p>⌐ pin the ones you play — click a name</p>}</section>}
-            {groupParams(params).map((group) => <section key={group.name || 'ungrouped'}>
+            {asKnobs
+                ? <div className="auto-param-panel__dials">{params.map((param) => dial(param))}</div>
+                : groupParams(params).map((group) => <section key={group.name || 'ungrouped'}>
                 {group.name && <button type="button" className="auto-param-panel__group" aria-expanded={!closedGroups.has(group.name)} onClick={() => setClosedGroups((current) => { const next = new Set(current); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next; })}>{closedGroups.has(group.name) ? '▸' : '⌄'} {group.name}<span>{group.params.length} params</span></button>}
                 {!closedGroups.has(group.name) && group.params.map((param) => row(param))}
             </section>)}

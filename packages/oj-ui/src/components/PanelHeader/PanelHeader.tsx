@@ -1,13 +1,12 @@
 import type { HTMLAttributes, ReactNode } from 'react';
-import { Button } from '../Button/Button';
 import { IconButton } from '../IconButton/IconButton';
 import { IconClose, IconChevronRight } from '../Icons/Icons';
 import './PanelHeader.css';
 
 export interface PanelHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
-    /** The strip's heading, set in the Caveat voice (Caveat-Is-the-Voice). */
+    /** The strip's 22px/600 Outfit heading. */
     title?: ReactNode;
-    /** A quieter line under the title, set in Inter for dense reading. */
+    /** A quieter 13px Outfit line under the title. */
     subtitle?: ReactNode;
     /**
      * When given, a leading ghost back affordance (a left-pointing chevron +
@@ -33,7 +32,7 @@ export interface PanelHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, '
 
 /**
  * A panel / dialog title strip. A space-between row: on the left an optional
- * back step then the title (Caveat) and subtitle (Inter) with an optional
+ * back step then the Outfit title/subtitle with an optional
  * badge; on the right an actions slot then an optional close button. Composes
  * Button, IconButton and the close/chevron icons — props in, callbacks out, no
  * app state. Theme-agnostic: styled entirely via semantic CSS variables, so it
@@ -59,8 +58,8 @@ export function PanelHeader({
             <div className="oj-panel-header__row">
                 <div className="oj-panel-header__left">
                     {onBack && (
-                        <Button
-                            variant="ghost"
+                        <IconButton
+                            label={backLabel}
                             className="oj-panel-header__back"
                             onClick={onBack}
                         >
@@ -68,8 +67,7 @@ export function PanelHeader({
                                 className="oj-panel-header__back-chevron"
                                 aria-hidden="true"
                             />
-                            {backLabel}
-                        </Button>
+                        </IconButton>
                     )}
                     {(title != null || subtitle != null || badge != null) && (
                         <div className="oj-panel-header__heading">

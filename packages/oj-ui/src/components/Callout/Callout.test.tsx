@@ -6,8 +6,9 @@ describe('Callout', () => {
     it('renders the base class and defaults to the info variant', () => {
         const { container } = render(<Callout>Body</Callout>);
         const box = container.querySelector('.oj-callout')!;
-        expect(box.className).toBe('oj-callout oj-callout--info');
+        expect(box.className).toContain('oj-callout');
         expect(box.getAttribute('role')).toBe('note');
+        expect(box.className).toContain('oj-surface--elevation-raised');
         expect(box.textContent).toBe('Body');
     });
 

@@ -20,11 +20,19 @@ export default defineConfig([
     'apps/docs/dist/**',
     'pi-openjammer-graph/**',
     '.claude/**',
+    'plans/**',
     // Ladle catalog config/provider — dev tooling, not app source.
     '.ladle/**',
     // Persisted use_figma build snippets — pasted into the Figma plugin runtime
     // (top-level `await`/`return` by design), not standalone JS modules.
     '.design-sync/figma-scripts/**',
+    // wasm-bindgen OUTPUT. `wasm-pack` regenerates this whole directory on every
+    // wasm build and stamps its own `/* eslint-disable */` / `/* tslint:disable */`
+    // header, which eslint then reports as an unused directive — a warning nobody
+    // can fix without editing a generated file that the next build overwrites.
+    // Generated artifacts are not source; linting them can only ever produce
+    // noise the gates then have to explain away.
+    'src/audio/wasm/pkg/**',
   ]),
   {
     files: ['**/*.{ts,tsx}'],

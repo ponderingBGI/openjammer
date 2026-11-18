@@ -22,3 +22,9 @@ export const Levels: Story = () => (
         <ProgressBar value={7} max={10} tone="success" aria-label="7 of 10" />
     </div>
 );
+
+export const Indeterminate: Story = () => (
+    <div style={{ width: 280 }}>
+        <ProgressBar indeterminate aria-label="Loading patch" />
+    </div>
+);

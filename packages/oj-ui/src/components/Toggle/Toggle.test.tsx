@@ -6,7 +6,7 @@ describe('Toggle', () => {
     it('renders the base class with a real checkbox and the label', () => {
         const { container } = render(<Toggle checked={false} onChange={() => {}} label="Auto-update" />);
         const root = container.querySelector('label.oj-toggle')!;
-        expect(root.className).toBe('oj-toggle');
+        expect(root.className).toContain('oj-toggle');
         const input = container.querySelector('input.oj-toggle__input') as HTMLInputElement;
         expect(input.getAttribute('type')).toBe('checkbox');
         expect(input.checked).toBe(false);

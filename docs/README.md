@@ -11,13 +11,15 @@ everything else is the way it is.
   infinite by everyone), the nine code values, and the day-to-day playbook. Loaded every session.
 - [PRODUCT.md](../PRODUCT.md): who plays OpenJammer and why — register, users,
   anti-references, the design principles, and the Live Performance Rule. The strategic brief.
-- [DESIGN.md](../DESIGN.md): the visual system — "The Living Sketchbook" (hand-drawn
-  Caveat, warm dot-grid paper, hard blur-free shadows, audio-blue/control-grey ports).
+- [DESIGN.md](../DESIGN.md): the visual system — calm ground, loud signal (Outfit on a warm
+  dot-grid canvas, soft layered depth, audio-teal/control-grey/universal-violet ports).
 
 ## Architecture & extension
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the North star, the `ojcore` crate map, and the
   build/run/test/CI commands.
+- [shell.md](shell.md): the app shell — the topbar, the one floating transport
+  pill, the three-question first run, the preset rigs and the density personas.
 - [timeline.md](timeline.md): the on-canvas DAW — the `Song` node, the shared
   `Arrangement` a human and an agent co-author through reversible verbs, how it plays and
   persists, and the honest roadmap of what's still ahead.

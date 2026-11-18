@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Button } from '../Button/Button';
 import './IconButton.css';
@@ -32,20 +33,29 @@ export interface IconButtonProps
  * (DESIGN.md §5) and stays theme-agnostic. Replaces the legacy `.toolbar-btn-icon`
  * and every ✕/close icon trigger. The required `label` keeps the control named
  * for assistive tech even though it shows no text.
+ *
+ * `forwardRef`, like {@link Button}: an icon-only control is exactly the kind a
+ * menu, a popover or a confirm has to FOCUS or measure, and a component that
+ * will not hand the caller its element forces the caller to fork it
+ * (W5-P7-REVIEW claim 4). `...rest` still reaches the DOM unchanged.
  */
-export function IconButton({
-    icon,
-    label,
-    variant = 'ghost',
-    active = false,
-    children,
-    className,
-    ...rest
-}: IconButtonProps) {
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
+    {
+        icon,
+        label,
+        variant = 'ghost',
+        active = false,
+        children,
+        className,
+        ...rest
+    },
+    ref,
+) {
     const classes = ['oj-icon-btn', className].filter(Boolean).join(' ');
 
     return (
         <Button
+            ref={ref}
             iconOnly
             variant={variant}
             active={active}
@@ -56,4 +66,4 @@ export function IconButton({
             {icon ?? children}
         </Button>
     );
-}
+});

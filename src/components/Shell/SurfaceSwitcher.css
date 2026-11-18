@@ -1,0 +1,19 @@
+/* Canvas / Arrangement, plus the key that does the same thing. */
+
+.oj-surface-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.oj-surface-switcher__hint {
+    font-size: 10.5px;
+}
+
+/* On a narrow window the keycap is the first thing to go: the segments still
+   say where you are, and the key still works. */
+@media (max-width: 1100px) {
+    .oj-surface-switcher__hint {
+        display: none;
+    }
+}

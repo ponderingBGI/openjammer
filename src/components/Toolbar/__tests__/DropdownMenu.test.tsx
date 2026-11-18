@@ -28,10 +28,10 @@ describe('DropdownMenu', () => {
             expect(screen.getByRole('button', { name: /File/i })).toBeInTheDocument();
         });
 
-        it('should render chevron indicator', () => {
+        it('should not decorate the trigger with a chevron', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
 
-            expect(screen.getByText('▾')).toBeInTheDocument();
+            expect(screen.queryByText('▾')).not.toBeInTheDocument();
         });
 
         it('should not show dropdown content by default', () => {
@@ -172,68 +172,74 @@ describe('DropdownMenu', () => {
     });
 
     describe('keyboard navigation', () => {
+        const menu = () => screen.getByRole('menu');
+        const row = (text: string) => screen.getByText(text).closest('[role="menuitem"]') as HTMLElement;
+
         it('should focus first item when opening', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            const firstItem = screen.getByText('Item 1').closest('[role="menuitem"]');
-            expect(firstItem).toHaveClass('dropdown-item-focused');
+            expect(document.activeElement).toBe(row('Item 1'));
+            expect(row('Item 1')).toHaveClass('dropdown-item-focused');
         });
 
         it('should navigate down with ArrowDown', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
+            fireEvent.keyDown(menu(), { key: 'ArrowDown' });
 
-            const secondItem = screen.getByText('Item 2').closest('[role="menuitem"]');
-            expect(secondItem).toHaveClass('dropdown-item-focused');
+            expect(document.activeElement).toBe(row('Item 2'));
+            expect(row('Item 2')).toHaveClass('dropdown-item-focused');
         });
 
         it('should navigate up with ArrowUp', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            // Navigate down first
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
-            // Then up
-            fireEvent.keyDown(document, { key: 'ArrowUp' });
+            fireEvent.keyDown(menu(), { key: 'ArrowDown' });
+            fireEvent.keyDown(menu(), { key: 'ArrowUp' });
 
-            const firstItem = screen.getByText('Item 1').closest('[role="menuitem"]');
-            expect(firstItem).toHaveClass('dropdown-item-focused');
+            expect(document.activeElement).toBe(row('Item 1'));
         });
 
         it('should wrap around when navigating past last item', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            // Navigate down 3 times (past all actionable items)
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
+            // Item 3 is disabled, so the enabled ring is Item 1 -> Item 2 -> Item 1.
+            fireEvent.keyDown(menu(), { key: 'ArrowDown' });
+            fireEvent.keyDown(menu(), { key: 'ArrowDown' });
 
-            // Should wrap to first item
-            const firstItem = screen.getByText('Item 1').closest('[role="menuitem"]');
-            expect(firstItem).toHaveClass('dropdown-item-focused');
+            expect(document.activeElement).toBe(row('Item 1'));
         });
 
         it('should wrap around when navigating before first item', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            // Navigate up (before first item)
-            fireEvent.keyDown(document, { key: 'ArrowUp' });
+            fireEvent.keyDown(menu(), { key: 'ArrowUp' });
 
-            // Should wrap to last actionable item
-            const lastItem = screen.getByText('Item 3').closest('[role="menuitem"]');
-            expect(lastItem).toHaveClass('dropdown-item-focused');
+            // The disabled Item 3 is skipped: the last ENABLED row is Item 2.
+            expect(document.activeElement).toBe(row('Item 2'));
+        });
+
+        it('should jump to the ends with Home and End', () => {
+            render(<DropdownMenu label="File" items={defaultItems} />);
+            fireEvent.click(screen.getByRole('button'));
+
+            fireEvent.keyDown(menu(), { key: 'End' });
+            expect(document.activeElement).toBe(row('Item 2'));
+
+            fireEvent.keyDown(menu(), { key: 'Home' });
+            expect(document.activeElement).toBe(row('Item 1'));
         });
 
         it('should activate item with Enter', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            fireEvent.keyDown(document, { key: 'Enter' });
+            fireEvent.keyDown(row('Item 1'), { key: 'Enter' });
 
             expect(mockOnClick).toHaveBeenCalledTimes(1);
         });
@@ -242,7 +248,7 @@ describe('DropdownMenu', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            fireEvent.keyDown(document, { key: ' ' });
+            fireEvent.keyDown(row('Item 1'), { key: ' ' });
 
             expect(mockOnClick).toHaveBeenCalledTimes(1);
         });
@@ -251,13 +257,18 @@ describe('DropdownMenu', () => {
             render(<DropdownMenu label="File" items={defaultItems} />);
             fireEvent.click(screen.getByRole('button'));
 
-            // Navigate to disabled item
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
-            fireEvent.keyDown(document, { key: 'ArrowDown' });
-
-            fireEvent.keyDown(document, { key: 'Enter' });
+            fireEvent.keyDown(row('Item 3'), { key: 'Enter' });
 
             expect(mockOnClick).not.toHaveBeenCalled();
+        });
+
+        it('should never let arrow navigation land on a disabled row', () => {
+            render(<DropdownMenu label="File" items={defaultItems} />);
+            fireEvent.click(screen.getByRole('button'));
+
+            for (let i = 0; i < 5; i++) fireEvent.keyDown(menu(), { key: 'ArrowDown' });
+
+            expect(document.activeElement).not.toBe(row('Item 3'));
         });
     });
 

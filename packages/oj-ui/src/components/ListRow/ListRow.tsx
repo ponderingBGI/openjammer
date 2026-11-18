@@ -27,8 +27,7 @@ export function List({ role = 'list', className, children, ...rest }: ListProps)
 export interface ListRowProps extends HTMLAttributes<HTMLDivElement> {
     /** Chosen/active in a multi-pick sense — draws the accent ring + faint fill. */
     selected?: boolean;
-    /** The row that *is* the live value right now (e.g. the model in use) — adds a
-     *  left accent marker so "selected to choose" and "currently in effect" read apart. */
+    /** The row that is live now; shown with a compact dot before its label. */
     current?: boolean;
     /** Dims and blocks pointer interaction; sets `aria-disabled` for assistive tech. */
     disabled?: boolean;
@@ -40,8 +39,8 @@ export interface ListRowProps extends HTMLAttributes<HTMLDivElement> {
 /**
  * One row in a {@link List}. Owns the single selected / hover / current ruleset
  * shared by every list surface (DESIGN.md §4 No-Surprise: feedback is color and
- * border only). Hover fills with `--bg-tertiary`; `selected` adds the hard accent
- * ring + faint accent fill; `current` adds a left accent marker. Caveat voice.
+ * border only). Hover fills with `--bg-tertiary`; `selected` adds an accent
+ * outline on keyboard focus; `current` adds a six-pixel dot before the label.
  */
 export function ListRow({
     selected = false,

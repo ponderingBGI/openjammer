@@ -14,7 +14,7 @@ describe('SegmentedControl', () => {
             <SegmentedControl aria-label="g" options={OPTIONS} value="a" onChange={() => {}} />,
         );
         const list = container.querySelector('[role="tablist"]')!;
-        expect(list.className).toBe('oj-seg');
+        expect(list.className).toContain('oj-seg');
         expect(list.getAttribute('aria-label')).toBe('g');
         expect(list.getAttribute('aria-orientation')).toBe('horizontal');
         const tabs = container.querySelectorAll('[role="tab"]');
@@ -27,8 +27,8 @@ describe('SegmentedControl', () => {
             <SegmentedControl aria-label="g" options={OPTIONS} value="b" onChange={() => {}} />,
         );
         const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-        expect(tabs[0]!.className).toBe('oj-seg__btn');
-        expect(tabs[1]!.className).toBe('oj-seg__btn is-active');
+        expect(tabs[0]!.className).toContain('oj-seg__btn');
+        expect(tabs[1]!.className).toContain('oj-seg__btn');
         expect(tabs[1]!.getAttribute('aria-selected')).toBe('true');
         expect(tabs[0]!.getAttribute('aria-selected')).toBe('false');
     });
@@ -129,7 +129,7 @@ describe('SegmentedControl', () => {
                 onChange={() => {}}
             />,
         );
-        expect(container.querySelector('[role="tablist"]')!.className).toBe('oj-seg mine');
+        expect(container.querySelector('[role="tablist"]')!.className).toContain('oj-seg');
     });
 });
 

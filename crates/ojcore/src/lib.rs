@@ -138,7 +138,7 @@ pub use structural::{
 
 // --- U12/U15/U16 additive surface ---
 pub use meter::{Meter, MeterBank};
-pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
+pub use resilience::{sanitize, CommandCoalescer, NodeBudget, SanitizeReport};
 pub use tempo::{MetricCursor, MetricPosition, TempoMapRt};
 pub use timeline::TimelineRt;
 pub use transport::{DeclickAmp, Disposition, Motion, Transport, TransportFsm, TransportPos};

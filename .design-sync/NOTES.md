@@ -74,10 +74,14 @@ corrected two claims that no longer verified, plus one gap:
 - `Callout` takes **`variant`** (success｜danger｜warning｜info｜tip), not `tone` — only `Banner`
   has `tone`. The old text said "`Callout`/`Banner` `tone`", which would have had the design
   agent writing a prop that does nothing.
-- Universal ports render the **rainbow-until-typed gradient**, not solid violet. `--universal-port`
-  (#9B59B6) is defined in the tokens but no component consumes it (see
-  `docs/node-migration-plan.md` — the violet-vs-rainbow decision is still open with the design
-  owner). If that decision lands, re-check this line.
+- **Settled, and this line used to say the opposite.** Universal ports render a FLAT
+  VIOLET; the rainbow-until-typed gradient is retired (DESIGN.md 2, "Wiring - the
+  legend"). There is one token, `--universal-connection`, and it paints both the socket
+  and the cable. The `--universal-port` this note described as "defined but consumed by
+  no component" was exactly that - dormant - so W6-SHIP deleted it from both theme JSONs,
+  all four generated sheets and `oj-tokens/src/types.ts`, under code-value #8 (every
+  production line is used). `AGENTS.md`'s port law had been pointing readers at the dead
+  one; it now names the token that paints.
 - Added the `--timeline-*` token family, now that the timeline components ship.
 
 ## Timeline components (added this sync)

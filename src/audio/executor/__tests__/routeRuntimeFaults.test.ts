@@ -95,4 +95,46 @@ describe('routeRuntimeFaults', () => {
     it('is safe when the engine node does not resolve to a visual id', () => {
         expect(() => routeRuntimeFaults([nodeFault(9, 'Crashed')], () => undefined)).not.toThrow();
     });
+
+    it('grows the undo history by ZERO — a crash is not an edit', () => {
+        // A crash writes TWO things onto the node: the badge flag (via
+        // `setNodePluginLoadError`, fixed in a28f710) and the fault kind +
+        // bypass pair right beside it. Only the first took `{ record: false }`,
+        // so one crash mid-set still minted an undo entry and the player's next
+        // `Ctrl+Z` un-bypassed a dead plugin instead of undoing their edit.
+        const id = addEffect();
+        useHistoryStore.getState().clear();
+
+        routeRuntimeFaults([nodeFault(5, 'Crashed')], () => id);
+
+        const data = useGraphStore.getState().nodes.get(id)!.data as NodeData & {
+            pluginFaultKind?: string;
+            pluginBypassed?: boolean;
+        };
+        // Both writes LANDED — silent is not a no-op…
+        expect(data.pluginLoadError).toBe(true);
+        expect(data.pluginFaultKind).toBe('Crashed');
+        expect(data.pluginBypassed).toBe(true);
+        // …and history never noticed either of them.
+        expect(useHistoryStore.getState().entries).toHaveLength(0);
+        expect(useHistoryStore.getState().canUndo()).toBe(false);
+    });
+
+    it('leaves the player their own last edit to undo', () => {
+        const id = addEffect();
+        useGraphStore.getState().addNode('speaker', { x: 400, y: 0 });
+        const speakerId = Array.from(useGraphStore.getState().nodes.values())
+            .find((n) => n.type === 'speaker')!.id;
+        useHistoryStore.getState().clear();
+
+        useGraphStore.getState().updateNodeData(speakerId, { volume: 0.25 });
+        routeRuntimeFaults([nodeFault(5, 'Crashed')], () => id);
+
+        expect(useHistoryStore.getState().entries).toHaveLength(1);
+        useGraphStore.getState().undo();
+        expect(
+            (useGraphStore.getState().nodes.get(speakerId)!.data as { volume?: number }).volume,
+        ).not.toBe(0.25);
+        expect(flag(id)).toBe(true);
+    });
 });

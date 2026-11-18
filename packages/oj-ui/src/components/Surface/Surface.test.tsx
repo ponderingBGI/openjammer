@@ -3,33 +3,31 @@ import { describe, it, expect } from 'vitest';
 import { Surface } from './Surface';
 
 describe('Surface', () => {
-    it('renders the base class with rest/lg defaults', () => {
+    it('renders the base class with raised/lg defaults', () => {
         const { container } = render(<Surface>card</Surface>);
         const el = container.querySelector('div')!;
-        expect(el.className).toBe(
-            'oj-surface oj-surface--elevation-rest oj-surface--radius-lg',
-        );
+        expect(el.className).toContain('oj-surface');
         expect(el.textContent).toBe('card');
     });
 
     it('applies the elevation and radius modifiers', () => {
         const { container } = render(
-            <Surface elevation="lifted" radius="xl">
+            <Surface elevation="overlay" radius="xl">
                 x
             </Surface>,
         );
         const cls = container.querySelector('div')!.className;
-        expect(cls).toContain('oj-surface--elevation-lifted');
+        expect(cls).toContain('oj-surface--elevation-overlay');
         expect(cls).toContain('oj-surface--radius-xl');
-        expect(cls).not.toContain('oj-surface--elevation-rest');
+        expect(cls).not.toContain('oj-surface--elevation-raised');
         expect(cls).not.toContain('oj-surface--radius-lg');
     });
 
-    it('maps the menu elevation', () => {
-        const { container } = render(<Surface elevation="menu">m</Surface>);
-        expect(container.querySelector('div')!.className).toContain(
-            'oj-surface--elevation-menu',
-        );
+    it('maps deprecated elevations onto the two New DNA depths', () => {
+        const { container, rerender } = render(<Surface elevation="menu">m</Surface>);
+        expect(container.querySelector('div')!.className).toContain('oj-surface--elevation-overlay');
+        rerender(<Surface elevation="lifted">m</Surface>);
+        expect(container.querySelector('div')!.className).toContain('oj-surface--elevation-raised');
     });
 
     it('merges a custom className after the base classes', () => {

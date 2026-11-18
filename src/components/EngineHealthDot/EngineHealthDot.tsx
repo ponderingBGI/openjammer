@@ -25,14 +25,19 @@
 import { useEngineHealthStore, presentHealth, latencyTierLabel } from '../../store/engineHealthStore';
 import { StatusDot } from '@openjammer/oj-ui';
 import { isTauri } from '../../audio/executor';
+import { useAudioStore } from '../../store/audioStore';
 import './EngineHealthDot.css';
 
 export function EngineHealthDot() {
     const health = useEngineHealthStore((s) => s.health);
     const reason = useEngineHealthStore((s) => s.reason);
 
+    // The MEASURED round trip, so this sentence and the latency chip 8px to its
+    // right can never give a novice two different answers (HA-06).
+    const roundTrip = useAudioStore((s) => s.audioMetrics.estimatedRoundTrip);
+
     const present = presentHealth(health, reason);
-    const tier = latencyTierLabel(isTauri());
+    const tier = latencyTierLabel(isTauri(), roundTrip);
     const tooltip = `${present.label}. ${present.blurb} Latency: ${tier}.`;
 
     const openDetail = () => {

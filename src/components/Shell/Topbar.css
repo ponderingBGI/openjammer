@@ -1,0 +1,166 @@
+/*
+ * Topbar — the app's one rule.
+ *
+ * A 46px band on `--bg-node-header` closed by a single hairline. Everything in
+ * it is quiet: ghost triggers, muted glyphs, chips that tint their TEXT and not
+ * their fill. The loudest thing on screen must always be the patch, and after
+ * that the transport — never the chrome.
+ */
+
+:root {
+    /* Shared with the transport pill and the surface layers, so the stage's
+       ceiling is one number in one place. */
+    --oj-topbar-height: 46px;
+}
+
+.oj-topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--oj-topbar-height);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0 var(--space-md);
+    background: var(--bg-node-header);
+    border-bottom: 1px solid var(--border-subtle);
+    z-index: var(--z-panel);
+    font-family: var(--font-sans);
+}
+
+.oj-topbar__cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.oj-topbar__cluster--left {
+    flex: 1 1 auto;
+}
+
+.oj-topbar__cluster--centre {
+    flex: 0 0 auto;
+}
+
+.oj-topbar__cluster--right {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+}
+
+/* ── Brand ───────────────────────────────────────────────────────────────── */
+
+.oj-topbar__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-right: var(--space-sm);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.oj-topbar__brand-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}
+
+.oj-topbar__menus {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+}
+
+/*
+ * The menu bar's in-UI confirm (`role="alertdialog"`), where a native confirm()
+ * used to blank the instrument. It hangs from the bar it was asked in, so the
+ * answer never arrives detached from the question.
+ */
+.oj-menu-confirm {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    z-index: var(--z-popover);
+    width: 320px;
+    text-align: left;
+}
+
+.oj-menu-confirm__body {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.oj-menu-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+}
+
+/*
+ * The New Project dialog is the same hanging card as the confirm — it is asked
+ * in the bar it was invoked from — but it collects a name, so it needs a field
+ * row and a little more width for the two sentences about where work lives.
+ */
+.oj-new-project {
+    width: 380px;
+}
+
+.oj-new-project__field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: var(--space-sm);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.file-input-hidden {
+    display: none;
+}
+
+/* A hairline grouping the right cluster into "history · state · session". */
+.oj-topbar__rule {
+    width: 1px;
+    height: 20px;
+    flex: none;
+    margin: 0 4px;
+    background: var(--border-subtle);
+}
+
+.oj-topbar__project {
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * NOTE — do not re-add a `.oj-topbar .collab-control` override here. P9 restyled
+ * the control to `position: relative` so its popover anchors to the TRIGGER;
+ * forcing `position: static` from the topbar sends the popover's `absolute`
+ * anchor up to `.oj-topbar` (full window width) and pins it flush to the window
+ * edge with no gap under the button. The control owns its own placement now.
+ */
+
+@media (max-width: 900px) {
+    .oj-topbar__brand {
+        font-size: 0;
+        gap: 0;
+        margin-right: var(--space-xs);
+    }
+
+    .oj-topbar__project {
+        display: none;
+    }
+}

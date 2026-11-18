@@ -5,7 +5,9 @@
 //! misbehaving hosted node can never take down the audio thread:
 //!
 //! 1. [`sanitize`] — flush any non-finite (NaN/Inf) sample at a hosted-node or
-//!    master output boundary and report whether it had to. `no_std`.
+//!    master output boundary and report *which* of non-finite / denormal /
+//!    clamped it had to do ([`SanitizeReport`]). Only the non-finite bit is a
+//!    fault; the other two are housekeeping on healthy audio. `no_std`.
 //! 2. [`Watchdog`] — measures hosted-node render wall-time and flags / auto-
 //!    bypasses a plugin that blows its per-block CPU budget. Wall-clock timing
 //!    needs `std::time::Instant`, so the watchdog itself is `std`-gated; the
@@ -18,36 +20,83 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+// ONE denormal floor for the whole engine, shared with the DSP kernels.
+//
+// These two have to agree or the false fault card comes back: every
+// recirculating kernel floors its state with `guards::flush_denormal` at this
+// threshold precisely so `sanitize` never has to flush it here. A second private
+// copy of the constant would be exactly the "parallel version" code-value #2
+// forbids — one number, one home.
+use ojcore_dsp::guards::DENORMAL_FLOOR;
 use ojproto::RtCommand;
 
-/// Flush every non-finite (NaN/Inf) and denormal sample in `buf` to `0.0`.
+/// What [`sanitize`] had to do to a block. THREE independent conditions, kept
+/// apart on purpose.
 ///
-/// Returns `true` if any sample had to be flushed, so the caller can raise a
-/// "this node emitted garbage" flag. Denormals are flushed too: they are finite
-/// but cost orders of magnitude more CPU on most FPUs, so silencing them is both
-/// a correctness and a CPU-spike guard. Alloc-free; safe on the audio thread.
+/// They used to collapse into one `bool`, and that single bit was wired straight
+/// to `NodeBudget::non_finite` -> `FaultKind::NonFinite` -> the player-facing
+/// "this node is sending noise we can't play" card. So a delay tail decaying
+/// into the subnormal band - perfectly healthy audio, doing exactly what a delay
+/// tail does - raised a permanent plugin-fault card ~10x/s, forever, about 18
+/// seconds after the last note.
+///
+/// Only [`Self::non_finite`] is *garbage*. The other two are housekeeping the
+/// engine performs on healthy signal and must never report as a fault: the
+/// covenant's "collect diagnostics quietly" applies. They stay on the struct so
+/// a diagnostic consumer can still see them; the render path acts on
+/// `non_finite` alone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SanitizeReport {
+    /// A `NaN`/`Inf` was found and flushed to `0.0`. **Garbage** - the only
+    /// condition that raises a node fault.
+    pub non_finite: bool,
+    /// A finite but subnormal-band sample was flushed to `0.0`. Housekeeping: a
+    /// CPU-spike guard on healthy audio, NOT a fault.
+    pub denormal: bool,
+    /// A sample exceeded the +/-4.0 headroom guard and was clamped.
+    /// Housekeeping: loud, not broken. NOT a fault.
+    pub clamped: bool,
+}
+
+impl SanitizeReport {
+    /// Whether the block was left byte-identical (nothing had to be touched).
+    #[inline]
+    pub fn is_clean(&self) -> bool {
+        !self.non_finite && !self.denormal && !self.clamped
+    }
+}
+
+/// Flush every non-finite (NaN/Inf) and denormal sample in `buf` to `0.0` and
+/// clamp anything past the +/-4.0 headroom guard.
+///
+/// Returns a [`SanitizeReport`] saying *which* of the three it had to do, so the
+/// caller can raise a "this node emitted garbage" flag for `NaN`/`Inf` **only**
+/// and stay silent about the two housekeeping cases. Denormals are still flushed
+/// (they are finite but cost orders of magnitude more CPU on most FPUs); they
+/// are simply no longer *reported* as garbage. Alloc-free, same branch shape as
+/// before; safe on the audio thread.
 #[inline]
-pub fn sanitize(buf: &mut [f32]) -> bool {
-    /// Anything with magnitude below this is treated as a denormal/sub-audible
-    /// zero and flushed (well under -300 dBFS, so never audible).
-    const DENORMAL_FLOOR: f32 = 1.0e-30;
-    let mut dirty = false;
+pub fn sanitize(buf: &mut [f32]) -> SanitizeReport {
+    let mut report = SanitizeReport::default();
     for s in buf.iter_mut() {
-        // Non-finite (NaN/Inf) OR a tiny-but-nonzero denormal both get flushed to
-        // a hard zero: the former is garbage, the latter is a CPU-spike hazard.
-        let flush = !s.is_finite() || (*s != 0.0 && s.abs() < DENORMAL_FLOOR);
-        if flush {
+        if !s.is_finite() {
+            // Real garbage: meaningless audio that would poison every later
+            // stage and the converters. This is the ONLY reportable case.
             *s = 0.0;
-            dirty = true;
+            report.non_finite = true;
+        } else if *s != 0.0 && s.abs() < DENORMAL_FLOOR {
+            // A CPU-spike hazard on otherwise healthy signal.
+            *s = 0.0;
+            report.denormal = true;
         } else if *s > 4.0 {
             *s = 4.0;
-            dirty = true;
+            report.clamped = true;
         } else if *s < -4.0 {
             *s = -4.0;
-            dirty = true;
+            report.clamped = true;
         }
     }
-    dirty
+    report
 }
 
 /// Per-node resilience bookkeeping: which nodes emitted non-finite output and
@@ -256,31 +305,49 @@ mod tests {
     #[test]
     fn sanitize_flushes_non_finite() {
         let mut buf = [1.0, f32::NAN, 0.5, f32::INFINITY, -2.0, f32::NEG_INFINITY];
-        assert!(sanitize(&mut buf));
+        let r = sanitize(&mut buf);
+        assert!(r.non_finite, "NaN/Inf is the reportable case");
         assert_eq!(buf, [1.0, 0.0, 0.5, 0.0, -2.0, 0.0]);
     }
 
     #[test]
-    fn sanitize_clean_block_reports_false() {
+    fn sanitize_clean_block_reports_nothing() {
         let mut buf = [0.1, -0.2, 0.3, 0.0];
-        assert!(!sanitize(&mut buf), "finite block is left untouched");
+        let r = sanitize(&mut buf);
+        assert!(r.is_clean(), "finite block is left untouched");
         assert_eq!(buf, [0.1, -0.2, 0.3, 0.0]);
     }
 
     #[test]
-    fn sanitize_flushes_denormals() {
+    fn sanitize_flushes_denormals_without_reporting_a_fault() {
         let mut buf = [1.0e-32f32, 5.0e-40, 0.5];
-        assert!(sanitize(&mut buf));
+        let r = sanitize(&mut buf);
+        assert!(r.denormal, "the denormal flush is still recorded");
+        assert!(
+            !r.non_finite,
+            "a denormal flush must NEVER read as garbage: that conflation is what \
+             raised a permanent NonFinite fault card on every healthy delay tail"
+        );
         assert_eq!(buf[0], 0.0);
         assert_eq!(buf[1], 0.0);
         assert_eq!(buf[2], 0.5);
     }
 
     #[test]
-    fn sanitize_hard_clamps_with_headroom() {
+    fn sanitize_hard_clamps_with_headroom_without_reporting_a_fault() {
         let mut buf = [3.5, 8.0, -9.0];
-        assert!(sanitize(&mut buf));
+        let r = sanitize(&mut buf);
+        assert!(r.clamped);
+        assert!(!r.non_finite, "loud is not broken");
         assert_eq!(buf, [3.5, 4.0, -4.0]);
+    }
+
+    #[test]
+    fn sanitize_reports_garbage_even_in_a_block_that_also_needed_housekeeping() {
+        let mut buf = [1.0e-40f32, f32::NAN, 9.0, 0.25];
+        let r = sanitize(&mut buf);
+        assert!(r.non_finite && r.denormal && r.clamped);
+        assert_eq!(buf, [0.0, 0.0, 4.0, 0.25]);
     }
 
     #[test]

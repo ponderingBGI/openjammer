@@ -56,6 +56,24 @@ export interface RecentProject {
   lastOpened: string;
 }
 
+/**
+ * What the UI hands `createProject`, so the store never has to raise a dialog of
+ * its own.
+ *
+ * The rule the codebase writes down two files away (`Shell/confirmFocus.ts`) is
+ * that a question is asked IN the app, never with a native `prompt()`/
+ * `confirm()`: those block the main thread, cannot be Escaped by app code, and
+ * take the keyboard off an instrument that may be sounding. So the name arrives
+ * already collected, and the overwrite question is a callback the caller answers
+ * with its own `role="alertdialog"`.
+ */
+export interface CreateProjectOptions {
+  /** Collected before the folder picker. Omitted → the folder's own name. */
+  name?: string;
+  /** Answer "this folder already has a project — overwrite?". Absent → no. */
+  confirmOverwrite?: (folderName: string) => Promise<boolean>;
+}
+
 export interface ProjectState {
   // Current project
   name: string | null;
@@ -72,7 +90,7 @@ export interface ProjectState {
   recentProjects: RecentProject[];
 
   // Actions
-  createProject: (name?: string) => Promise<FileSystemDirectoryHandle>;
+  createProject: (options?: CreateProjectOptions) => Promise<FileSystemDirectoryHandle>;
   openProject: () => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
   openRecentProject: (project: RecentProject) => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
   saveProject: (graphData: { nodes: unknown[]; edges: unknown[]; viewport?: { x: number; y: number; zoom: number }; arrangement?: Arrangement | null }) => Promise<void>;
@@ -492,7 +510,7 @@ export const useProjectStore = create<ProjectState>()(
       // ========================================
       // Create New Project
       // ========================================
-      createProject: async (name?: string) => {
+      createProject: async (options?: CreateProjectOptions) => {
         if (!isFileSystemAccessSupported()) {
           throw new Error('File System Access API not supported in this browser');
         }
@@ -511,21 +529,21 @@ export const useProjectStore = create<ProjectState>()(
             startIn: 'documents',
           });
 
-          // Now prompt for name (after folder is selected)
+          // The name was asked for in the app's own dialog, before the picker.
+          // A native `prompt()` used to ask here — it blocks the main thread,
+          // cannot be Escaped by app code and rips the keyboard away from an
+          // instrument that may be sounding (HA-15). With no name given, the
+          // folder's own name is the honest default, not a second dialog.
           const folderName = handle.name;
-          const projectName = name || prompt('Enter project name:', folderName);
-          if (!projectName) {
-            set({ isLoading: false });
-            throw new Error('Cancelled');
-          }
+          const projectName = options?.name?.trim() || folderName;
 
           // Check if folder already has a project
           try {
             await handle.getFileHandle(PROJECT_FILE_NAME);
-            // Project file exists - ask if they want to overwrite
-            const overwrite = confirm(
-              `This folder already contains a project. Overwrite?`
-            );
+            // A project file is already there. The caller owns the question —
+            // in the UI it is the same inline `alertdialog` the menu bar uses.
+            // Fail CLOSED when nobody can ask: never silently overwrite a song.
+            const overwrite = (await options?.confirmOverwrite?.(folderName)) === true;
             if (!overwrite) {
               set({ isLoading: false });
               throw new Error('Cancelled - folder already contains a project');

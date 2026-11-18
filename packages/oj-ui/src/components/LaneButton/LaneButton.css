@@ -1,18 +1,89 @@
 .oj-lane-button {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
     width: 24px;
     height: 24px;
-    border: 1.5px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--timeline-lane-bg);
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
     color: var(--text-muted);
-    box-shadow: var(--shadow-sketch);
-    font-family: var(--font-sans);
-    font-size: 13px;
-    font-weight: 700;
+    font: 700 var(--text-sm)/1 var(--font-sans);
+    cursor: pointer;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        color var(--motion-fast), box-shadow var(--motion-fast),
+        transform var(--motion-spring);
 }
-.oj-lane-button--mute[aria-pressed="true"] { color: var(--text-primary); background: var(--timeline-clip-muted-bg); text-decoration: line-through; }
-.oj-lane-button--solo[aria-pressed="true"] { color: var(--text-on-accent); background: var(--accent-success); box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-sketch); }
-.oj-lane-button--armed[aria-pressed="true"] { color: var(--accent-success); }
-.oj-lane-button--recording[aria-pressed="true"] { color: var(--timeline-playhead); }
-.oj-lane-button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .oj-lane-button { transform: none; transition: color 0s, border-color 0s, background-color 0s; } }
+
+.oj-lane-button:hover:not(:disabled) {
+    color: var(--text-primary);
+}
+
+.oj-lane-button:active:not(:disabled) {
+    transform: scale(var(--press-scale-btn));
+}
+
+.oj-lane-button:focus-visible {
+    outline: none;
+}
+
+.oj-lane-button:focus-visible::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--focus-ring);
+    pointer-events: none;
+}
+
+.oj-lane-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.oj-lane-button[aria-pressed='true'] {
+    background: var(--bg-node);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+}
+
+.oj-lane-button--mute[aria-pressed='true'] {
+    color: var(--warning-ink);
+    box-shadow: var(--shadow-raised);
+    text-decoration: line-through;
+}
+
+.oj-lane-button--solo[aria-pressed='true'] {
+    color: var(--accent-ink);
+    box-shadow: var(--shadow-raised);
+}
+
+.oj-lane-button--armed[aria-pressed='true'] {
+    color: var(--danger-ink);
+    box-shadow: var(--shadow-raised), inset 0 0 0 1.5px var(--danger-ink);
+}
+
+.oj-lane-button--recording[aria-pressed='true'],
+.oj-lane-button.is-recording[aria-pressed='true'] {
+    border-color: var(--accent-danger);
+    background: var(--accent-danger);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-danger) 35%, transparent);
+    animation: oj-lane-recording 1200ms ease-in-out infinite;
+}
+
+@keyframes oj-lane-recording {
+    50% {
+        box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-danger) 8%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-lane-button--recording[aria-pressed='true'],
+    .oj-lane-button.is-recording[aria-pressed='true'] {
+        animation: none;
+        box-shadow: 0 0 0 2px var(--danger-ink);
+    }
+}

@@ -51,7 +51,7 @@ export const Grid: Story = () => (
                     alignItems: 'center',
                     gap: 'var(--space-sm)',
                     padding: 'var(--space-md)',
-                    border: 'var(--border-sketch-width) solid var(--border-subtle)',
+                    border: '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-md)',
                     background: 'var(--bg-secondary)',
                 }}

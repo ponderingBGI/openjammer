@@ -1,16 +1,10 @@
-/*
- * Menu — DESIGN.md §5. The consolidation of the toolbar dropdown and the canvas
- * context-menu into one keyboard-navigable panel, backed by a Surface (white
- * node fill, 2px ink border, hard blur-free menu shadow). Styled only via
- * semantic tokens (no literal colors), so it follows the active theme. Hover/
- * focus fills a row with the accent and flips text to --text-on-accent (the
- * per-theme token for text on a fill — never a hardcoded white).
- */
+
 .oj-menu {
     display: flex;
     flex-direction: column;
     min-width: var(--node-min-width);
-    padding: var(--space-xs) 0;
+    padding: 6px;
+    border-radius: 12px;
 }
 
 /* Menu item — the actionable row. */
@@ -18,41 +12,35 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
+    padding: 8px 10px;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 500;
+    border-radius: 8px;
     color: var(--text-primary);
     cursor: pointer;
     outline: none;
     /* No-Surprise: feedback is color only, no motion/reflow on hover. */
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
 
 .oj-menu-item:hover,
 .oj-menu-item:focus-visible {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
+    background: var(--bg-tertiary);
 }
 
-/* The trailing keycap and chevron ride the accent fill on hover/focus. */
-.oj-menu-item:hover .oj-menu-item__shortcut,
-.oj-menu-item:focus-visible .oj-menu-item__shortcut {
-    border-color: var(--text-on-accent);
-    color: var(--text-on-accent);
-    background: transparent;
-}
-
-.oj-menu-item:hover .oj-menu-item__chevron,
-.oj-menu-item:focus-visible .oj-menu-item__chevron,
-.oj-menu-item:hover .oj-menu-item__icon,
-.oj-menu-item:focus-visible .oj-menu-item__icon {
-    color: var(--text-on-accent);
+.oj-menu-item:focus-visible {
+    box-shadow: var(--focus-ring);
 }
 
 /* Disabled — dimmed, non-actionable, no hover fill. */
 .oj-menu-item[aria-disabled='true'] {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
+}
+
+.oj-menu-item--danger {
+    color: var(--danger-ink);
 }
 
 .oj-menu-item[aria-disabled='true']:hover {
@@ -104,17 +92,37 @@
     display: block;
 }
 
-/* Category — a non-interactive group header. Muted work face so it reads as
-   structure, not an action (it never takes focus, never fills on hover). */
+/*
+ * Category — a non-interactive group header, in the MICRO VOICE.
+ *
+ * It reads as structure, not as an action: it never takes focus and never fills
+ * on hover, so it has to be quieter than the 14px items it sits above. It used
+ * to buy that quiet with a 10.5px SANS run, which DESIGN.md §3 forbids twice
+ * over — 10.5 is not on the scale at all, and functional sans never goes below
+ * the 13px floor (`Field`'s 12px label is the one exception, and this is not a
+ * field label). 13px sans is not the fix either: at 13/600 the header would be
+ * as loud as the item it introduces, and the hierarchy would invert.
+ *
+ * So it changes FACE rather than size. `--text-micro` is the voice the DNA
+ * already keeps for exactly this job — an uppercase, tracked, non-prose marker
+ * that names a group (socket labels, ruler marks, unit labels) — and the floor
+ * exempts it by construction. JetBrains Mono is the wider face, so 9.5px mono
+ * measures within a pixel of the 10.5px sans it replaces: the quiet is kept and
+ * the run is legal. `--text-muted` is unchanged and still clears 4.5:1.
+ *
+ * `src/components/CommandBar/CommandBar.css` (cmdk group headings, and the AI
+ * slash-menu empty row) still hard-codes the retired 10.5px sans — it belongs to
+ * another lane this week and is logged as a follow-up in W6-UI-REPORT.md §3.
+ */
 .oj-menu-category {
     display: flex;
     align-items: center;
     gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-md);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
+    padding: 8px 10px 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
     color: var(--text-muted);
 }
@@ -131,6 +139,6 @@
 /* Separator — a hairline rule between groups. */
 .oj-menu-separator {
     height: 1px;
-    margin: var(--space-xs) 0;
+    margin: 5px 8px;
     background: var(--border-subtle);
 }

@@ -51,7 +51,7 @@ reversible frame, and only fall back to authoring new DSP when nothing fits:
 
 A `WorkflowPlan` lets you describe a connected graph at a HIGHER altitude — nodes
 addressed by a model-chosen `ref` ("osc1", "out"), wires by the human port NAME
-("Audio Out" → "Audio In"), exactly as a person reads them off the canvas.
+("Out" → "In"), exactly as a person reads them off the canvas.
 `emit_plan` LOWERS that to `add_node` / `update_node_data` / `add_connection` and
 applies them through the same atomic `batch_apply` path, so it is never a new
 trust path — just a friendlier way to author one reversible frame. The validator
@@ -114,7 +114,7 @@ panel can do.
 - **get_settings** — Read the user-facing settings you may change: audio sample rate, latency hint, low-latency mode, input/output device, theme, and default velocity. Side-effect-free.
 - **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
 - **describe_arrangement** — Read the current SONG TIMELINE as a readable summary — tracks (by stable id), clips, addressable note details (id/pitch/tick/duration/velocity, capped per clip), sections, tempo, and automation, selection, grid, edit mode, armed tracks, click, count-in, punch and record state, all at bar.beat. Side-effect-free. GROUND yourself with this before editing the timeline (the "read the song first" twin of get_graph for the node graph).
-- **edit_timeline** — Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — the SAME operation layer a human GUI drag emits — applied live and undoable with Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.
+- **edit_timeline** — Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — the SAME operation layer a human GUI drag emits — applied live and undoable with Ctrl+Z. During a live performer gesture it returns `queued: true` and lands afterward; the next `describe_arrangement` reports the queued result. Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan/setTrackColor; setTrackRef (bind a track to the graph node that voices it); addGraphNode/removeGraphNode (the SONG graph, the one conduct lowers); addTrack/removeTrack/moveTrack; addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/moveLocation/setLocationName/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include `createClip { trackId, startTick, lengthTick, name? }` (the same atomic empty-lane Draw gesture), `addMarker { atTick, name? }` (the same marker Ctrl+M and a ruler double-click drop), moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.
 - **export_song** — Export the current arrangement in the desktop app. Pass `outPath` plus the native BounceSpec fields: sampleRate (44100/48000/88200/96000), bitDepth (16/24/32f), format (wav/flac), and an auto or fixed-seconds tail. Native-only; returns path, peak/clipping stats, frames, sample rate, and channels.
 
 **Authoring the timeline.** `describe_arrangement` + `edit_timeline` drive the on-canvas
@@ -142,8 +142,8 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
     { "ref": "out", "type": "speaker" }
   ],
   "wires": [
-    { "from": { "ref": "lp",  "port": "Audio Out" }, "to": { "ref": "amp", "port": "Audio In" } },
-    { "from": { "ref": "amp", "port": "Audio Out" }, "to": { "ref": "out", "port": "Audio In" } }
+    { "from": { "ref": "lp",  "port": "Out" }, "to": { "ref": "amp", "port": "In 1" } },
+    { "from": { "ref": "amp", "port": "Out" }, "to": { "ref": "out", "port": "In" } }
   ]
 }
 ```
@@ -151,7 +151,15 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
 - `ref` is YOUR symbolic id — wires point at refs, never at real node ids.
 - `type` is a built-in `NodeType` OR a registered dynamic plugin id.
 - `port` is the human NAME shown on the canvas; the lowering resolves it to the
-  real port id.
+  real port id. The generic signal ports are **`In`** and **`Out`**. Their retired
+  spellings (`Audio In` / `Audio Out` / `Input` / `Output` / `Audio`) and the raw
+  port id still resolve, so a plan you already learned keeps working — but write
+  the new names. A port with a name of its OWN keeps it and has no alias: the
+  multiplier really does have `In 1` / `In 2`, which is why the wire above says
+  `In 1`. When in doubt, `get_graph` reports each node's real port names.
+  (This example is pinned against the live registry by
+  `src/ai/__tests__/plan.test.ts` — it used to say `Audio In` into a multiplier,
+  a port that has never existed.)
 - `params` become the node's initial `data` (and a follow-up `update_node_data`).
 
 The validator (`validatePlan`) checks: every wire ref resolves; each type is

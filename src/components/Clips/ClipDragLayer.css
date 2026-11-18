@@ -1,88 +1,88 @@
-/**
- * ClipDragLayer - Styling for the drag overlay
+/*
+ * ClipDragLayer — the portal overlay a dragged clip lives in.
+ *
+ * WaveformView's drag contract, applied to the layer: the moving copy is at 96%
+ * with the overlay shadow, and the drop zones use the same 1.5px dashed accent
+ * edge as `is-drop-target`. The old version drew a 20px success halo, a text
+ * shadow, and three black-alpha shadows. Nothing here glows.
  */
-
-/* ============================================
- * Layer Container
- * ============================================ */
 
 .clip-drag-layer {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    inset: 0;
     pointer-events: none;
-    z-index: 10000;
+    z-index: var(--z-top);
 }
 
-/* ============================================
- * Drop Zone Highlights
- * ============================================ */
+/* ── Drop zones ────────────────────────────────────────────────────────── */
 
 .clip-drop-zone {
     position: fixed;
-    border: 2px dashed var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: transparent;
-    transition:
-        border-color var(--transition-fast),
-        background-color var(--transition-fast);
     display: flex;
     align-items: center;
     justify-content: center;
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-md);
+    background: transparent;
+    transition: border-color var(--motion-fast), background-color var(--motion-fast);
 }
 
 .clip-drop-zone.valid {
-    border-color: var(--accent-success);
+    border-color: var(--accent-primary);
 }
 
+/* An invalid target is not alarming — it just is not for you. Quiet it down
+   rather than painting it danger-red. */
 .clip-drop-zone.invalid {
-    border-color: var(--accent-danger);
-    opacity: 0.3;
+    border-color: var(--border-subtle);
+    opacity: 0.35;
 }
 
+/* The one you are over firms up: solid edge, faint accent wash. */
 .clip-drop-zone.hovered.valid {
-    background: color-mix(in srgb, var(--accent-success) 15%, transparent);
     border-style: solid;
-    box-shadow: 0 0 20px color-mix(in srgb, var(--accent-success) 30%, transparent);
+    background: color-mix(in oklab, var(--accent-primary) 10%, transparent);
 }
 
 .clip-drop-zone-label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--accent-success);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-    padding: 4px 12px;
-    background: color-mix(in srgb, var(--bg-node) 90%, transparent);
+    padding: 4px 10px;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-raised);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--accent-ink);
 }
 
-/* ============================================
- * Dragged Clip Preview
- * ============================================ */
+/* ── The moving copy ───────────────────────────────────────────────────── */
 
+/* 96% + the overlay shadow — the same "this is the copy in your hand" physics
+   as `.oj-waveform-view.is-dragging`. */
 .clip-drag-preview {
     position: fixed;
     pointer-events: none;
-    z-index: 10001;
-    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
+    z-index: calc(var(--z-top) + 1);
+    transform: scale(0.96);
+    transform-origin: top left;
+    filter: drop-shadow(0 12px 28px color-mix(in oklab, var(--text-primary) 22%, transparent));
 }
 
-/* ============================================
- * Cursor Hint Badge
- * ============================================ */
+/* ── Cursor hint ───────────────────────────────────────────────────────── */
 
 .clip-drag-hint {
     position: fixed;
     pointer-events: none;
-    z-index: 10002;
-    font-family: var(--font-sketch);
-    font-size: var(--text-xs);
-    color: var(--text-on-accent);
-    background: var(--accent-success);
+    z-index: calc(var(--z-top) + 2);
     padding: 4px 8px;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-raised);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-primary);
     white-space: nowrap;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }

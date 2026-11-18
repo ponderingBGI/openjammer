@@ -33,6 +33,15 @@ export const EmptyPlaceholder: Story = () => {
     return <EditableLabel value={name} placeholder="Name this node…" onCommit={setName} />;
 };
 
+export const MonoValue: Story = () => {
+    const [value, setValue] = useState('120.0 BPM');
+    return <EditableLabel value={value} mono onCommit={setValue} />;
+};
+
+export const Disabled: Story = () => (
+    <EditableLabel value="Locked track" disabled onCommit={() => {}} />
+);
+
 /** Controlled: the parent owns the `editing` flag and toggles it explicitly. */
 export const Controlled: Story = () => {
     const [name, setName] = useState('Input 1');

@@ -5,8 +5,12 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
-import { Toolbar } from './components/Toolbar/Toolbar';
-import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
+import { Topbar } from './components/Shell/Topbar';
+import { requestNewProject } from './components/Shell/newProjectDialog';
+import { TransportPillHost } from './components/Shell/TransportPillHost';
+import { HintBubble } from './components/Shell/HintBubble';
+import { StepGrid } from './components/Shell/StepGrid';
+import { OnboardingHost } from './components/Onboarding/OnboardingHost';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 // The full settings surface (panels, guides, the low-latency walkthrough) is a
 // modal opened on demand — never part of first paint. Code-split it behind a
@@ -36,7 +40,6 @@ const PluginsPanel = lazy(() =>
       default: module.PluginsPanel,
     })),
 );
-import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { initAudioContext, isAudioReady } from './audio/audioContext';
 import { getExecutor, isTauri } from './audio/executor';
@@ -49,14 +52,14 @@ import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
 import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
-import { writeEmergencyBackup } from './persistence/recovery';
+import { clearEmergencyBackup, registerEmergencyFlush, writeEmergencyBackup } from './persistence/recovery';
 import { collectSaveData } from './persistence/collectSaveData';
 import { useArrangementStore } from './store/arrangementStore';
-import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
+import { getSavedThemeId } from '@openjammer/oj-tokens';
 import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
+import { useOnboardingStore } from './store/onboardingStore';
 import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
 import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
-import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrome';
 import { ExportHost } from './components/Export';
 import { PianoRollSurfaceHost } from './components/PianoRoll';
 import { logger } from './utils/log';
@@ -76,6 +79,12 @@ function getDocumentVersion(): string {
 function PluginsPanelHost() {
   const [requested, setRequested] = useState(false);
   const [context, setContext] = useState<'browse' | 'pick' | 'insert'>('browse');
+  /*
+   * The FIRST open happens before the panel exists, so this host is the only
+   * thing that hears that event — which is why the track that asked has to be
+   * carried through here too, not just in the panel's own listener.
+   */
+  const [trackId, setTrackId] = useState<string | null>(null);
 
   useBindingSet(useMemo(() => ({
     id: 'plugins-panel-toggle',
@@ -93,8 +102,9 @@ function PluginsPanelHost() {
   useEffect(() => {
     if (requested) return;
     const request = (event: Event) => {
-      const requestedContext = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert' }>).detail?.context;
-      if (requestedContext) setContext(requestedContext);
+      const detail = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert'; trackId?: string }>).detail;
+      if (detail?.context) setContext(detail.context);
+      setTrackId(detail?.trackId ?? null);
       setRequested(true);
     };
     window.addEventListener('openjammer:toggle-plugins', request);
@@ -108,24 +118,27 @@ function PluginsPanelHost() {
   if (!requested) return null;
   return (
     <Suspense fallback={null}>
-      <PluginsPanel initiallyOpen context={context} />
+      <PluginsPanel initiallyOpen context={context} trackId={trackId} />
     </Suspense>
   );
 }
 
 function App() {
   useKeymapArbiter();
-  // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
-  // there because sound comes from the Rust/cpal engine over IPC, not Web Audio.
-  // The browser tier still shows the welcome screen (its gesture resumes Web Audio).
-  const [showActivation, setShowActivation] = useState(() => !isTauri());
   const [showSettings, setShowSettings] = useState(false);
+  // The three-step first run is the ONLY thing that opens over the studio, and
+  // only when no answers have ever been stored. On the browser tier its final
+  // tap is also the autoplay gesture (see OnboardingHost).
+  const onboardingAnswers = useOnboardingStore((s) => s.answers);
+  const showOnboarding = onboardingAnswers === null;
+  const [toastTheme, setToastTheme] = useState<'light' | 'dark'>(() =>
+    getSavedThemeId() === 'dark' ? 'dark' : 'light',
+  );
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
   const surface = useUiViewStore((s) => s.surface);
   const songNodeId = useUiViewStore((s) => s.songNodeId);
-  const setSurface = useUiViewStore((s) => s.setSurface);
   const previousSurface = useRef<SurfaceId>(surface);
   const [exitingSurface, setExitingSurface] = useState<SurfaceId | null>(null);
 
@@ -158,21 +171,23 @@ function App() {
   // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
   // into a deadly crash cycle. Runs once, before the autosave effects engage.
   const recovery = useCrashRecovery();
-  useModalKeymap('welcome', Boolean(showActivation || recovery.safeMode));
+  useModalKeymap('welcome', Boolean(showOnboarding || recovery.safeMode));
 
-  // Initialize theme
   useEffect(() => {
-    const savedId = getSavedThemeId();
-    const theme = getThemeById(savedId);
-    if (theme) applyTheme(theme);
+    const syncToastTheme = () => {
+      setToastTheme(getSavedThemeId() === 'dark' ? 'dark' : 'light');
+    };
+    window.addEventListener('openjammer:theme-change', syncToastTheme);
+    window.addEventListener('storage', syncToastTheme);
+    return () => {
+      window.removeEventListener('openjammer:theme-change', syncToastTheme);
+      window.removeEventListener('storage', syncToastTheme);
+    };
   }, []);
 
-  // Check if audio is already ready
+  // Check if audio is already ready (a hot reload, or a second mount).
   useEffect(() => {
-    if (isAudioReady()) {
-      setShowActivation(false);
-      setAudioContextReady(true);
-    }
+    if (isAudioReady()) setAudioContextReady(true);
   }, [setAudioContextReady]);
 
   // Listen for settings toggle event (custom event)
@@ -393,8 +408,19 @@ function App() {
 
     const flush = () => {
       const saveData = collectSaveData();
-      // Nothing meaningful to back up — don't clobber a good backup with empty.
-      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) return;
+      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) {
+        /*
+         * An empty document IS the document. This used to return early — "don't
+         * clobber a good backup with empty" — which only ever affected the
+         * canvas, and `zustand/persist` owned that anyway. Now that a clean boot
+         * RESTORES from this blob, keeping the old one means a player who
+         * deliberately cleared everything is handed the deleted song back on
+         * their next reopen. So an emptied document clears the backup instead of
+         * leaving a ghost of itself on disk.
+         */
+        clearEmergencyBackup();
+        return;
+      }
       writeEmergencyBackup({
         ...saveData,
         projectName: useProjectStore.getState().name,
@@ -411,16 +437,19 @@ function App() {
     const unsubscribeGraph = useGraphStore.subscribe(scheduleBackup);
     const unsubscribeArrangement = useArrangementStore.subscribe(scheduleBackup);
 
-    // Final flush on page hide (the hook marks the clean exit separately). No
-    // "leave site?" prompt: with durable autosave the work is recoverable, so we
-    // never nag the performer on the way out.
-    const onPageHide = () => flush();
-    window.addEventListener('pagehide', onPageHide);
+    // The final flush on the way out is NOT a second `pagehide` listener: it is
+    // registered here and CALLED by the recovery hook's one handler, immediately
+    // before it writes the clean-exit marker. A marker that says "closed
+    // cleanly" over a backup up to 2s stale is how the song used to be lost
+    // (UX-INV Q3, risk 1), and listener registration order is not an ordering.
+    // No "leave site?" prompt either: with durable autosave the work is
+    // recoverable, so we never nag the performer on the way out.
+    const unregisterFlush = registerEmergencyFlush(flush);
 
     return () => {
       unsubscribeGraph();
       unsubscribeArrangement();
-      window.removeEventListener('pagehide', onPageHide);
+      unregisterFlush();
       if (timer) clearTimeout(timer);
     };
   }, []);
@@ -433,7 +462,12 @@ function App() {
         actionId: 'file.save',
         run: () => {
           if (!projectName || !projectHandleKey) {
-            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+            // Settings advertises Ctrl+S as "Save Project", so it must DO
+            // something. There is nowhere to save yet, so the honest answer is
+            // to offer one — and to say, in the dialog, where the work is being
+            // kept in the meantime. This used to dispatch an event no listener
+            // anywhere subscribed to (UX-INV Q4).
+            requestNewProject('save-current');
             return true;
           }
           if (useProjectStore.getState().isSaving) return true;
@@ -473,56 +507,40 @@ function App() {
     ],
   }), [projectName, projectHandleKey, saveProject]));
 
-  // Initialize audio context on user gesture
-  const handleActivate = useCallback(async () => {
-    try {
-      await initAudioContext({
-        sampleRate: audioConfig.sampleRate,
-        latencyHint: audioConfig.latencyHint,
-        lowLatencyMode: audioConfig.lowLatencyMode
-      });
-      setAudioContextReady(true);
-      setShowActivation(false);
-
-      // One-time first-run hint: the fastest path to a first sound. Shown once
-      // (localStorage-gated), dismissible, never blocking.
+  /**
+   * Unlock audio. Called from the FINAL onboarding tap and from the transport
+   * pill's play button — both are real user gestures, and both call this
+   * synchronously so the AudioContext is constructed on the gesture's own stack.
+   * The browser's autoplay policy inspects exactly that.
+   */
+  const handleActivate = useCallback(() => {
+    void (async () => {
       try {
-        if (!localStorage.getItem('oj-first-run-done')) {
-          localStorage.setItem('oj-first-run-done', '1');
-          toast('🎹 Make your first sound', {
-            id: 'first-sound-hint',
-            description:
-              'Right-click the canvas → add a Keyboard and an Instrument, connect them to a Speaker, then press the Q–P keys. Press ? for help, or Ctrl/Cmd+K to ask the AI to build it for you.',
-            duration: 12000,
-          });
-        }
-      } catch {
-        // localStorage may be unavailable (private mode) — the hint is optional.
-      }
-
-      // Latency is no longer read here. It is polled centrally from the ACTIVE
-      // executor's backend (the effect below), so the native cpal stream and the
-      // browser AudioContext never get confused for one another.
-    } catch (err) {
-      console.error('Failed to initialize audio:', err);
-      // On native, sound is the Rust/cpal engine over IPC — it does NOT need the
-      // Web AudioContext. If construction failed here, still boot the engine and
-      // unlock the tools; never let a Web-Audio failure block the native canvas.
-      if (isTauri()) {
+        await initAudioContext({
+          sampleRate: audioConfig.sampleRate,
+          latencyHint: audioConfig.latencyHint,
+          lowLatencyMode: audioConfig.lowLatencyMode
+        });
         setAudioContextReady(true);
-        setShowActivation(false);
-        return;
+        // Latency is no longer read here. It is polled centrally from the ACTIVE
+        // executor's backend (the effect below), so the native cpal stream and the
+        // browser AudioContext never get confused for one another.
+      } catch (err) {
+        console.error('Failed to initialize audio:', err);
+        // On native, sound is the Rust/cpal engine over IPC — it does NOT need the
+        // Web AudioContext. If construction failed here, still boot the engine and
+        // unlock the tools; never let a Web-Audio failure block the native canvas.
+        if (isTauri()) {
+          setAudioContextReady(true);
+          return;
+        }
+        toast.error('Could not start audio', {
+          description:
+            'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
+        });
       }
-      toast.error('Could not start audio', {
-        description:
-          'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
-      });
-    }
+    })();
   }, [setAudioContextReady, audioConfig]);
-
-  useEffect(() => {
-    if (surface === 'arrangement') toast.dismiss('first-sound-hint');
-  }, [surface]);
 
   // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
   // on mount so the Rust engine wires up (the App-init effect keyed on
@@ -579,80 +597,10 @@ function App() {
         </Suspense>
       )}
 
-      {/* Welcome screen (browser tier only — native auto-starts, see useState above).
-          Suppressed in Safe Mode: SafeModeScreen is its own aria-modal dialog, and
-          two modal dialogs must never co-render (a held note beats a glitch — one
-          calm surface at a time). */}
-      {showActivation && !recovery.safeMode && (
-        <div
-          className="oj-welcome"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="oj-welcome-title"
-          onKeyDown={(e) => {
-            // 2-element focus loop — aria-modal is asserted, so keep Tab inside.
-            if (e.key !== 'Tab') return;
-            const focusables = e.currentTarget.querySelectorAll<HTMLElement>(
-              '.oj-welcome-option'
-            );
-            if (focusables.length === 0) return;
-            const first = focusables[0];
-            const last = focusables[focusables.length - 1];
-            if (e.shiftKey && document.activeElement === first) {
-              e.preventDefault();
-              last.focus();
-            } else if (!e.shiftKey && document.activeElement === last) {
-              e.preventDefault();
-              first.focus();
-            }
-          }}
-        >
-          <div className="oj-welcome-card">
-            <h1 id="oj-welcome-title" className="oj-welcome-title">
-              OpenJammer
-            </h1>
-            <p className="oj-welcome-intro">
-              A sketchbook you can play. Pick how you want to start.
-            </p>
-
-            <button
-              type="button"
-              className="oj-welcome-option oj-welcome-option--primary"
-              onClick={handleActivate}
-              autoFocus
-            >
-              <span className="oj-welcome-option-main">
-                <span className="oj-welcome-option-label">
-                  Play here in your browser
-                </span>
-                <span className="oj-welcome-option-sub">
-                  Start instantly — honest ~15–25&nbsp;ms latency in the browser.
-                </span>
-              </span>
-              <span className="oj-welcome-option-glyph" aria-hidden="true">
-                &rarr;
-              </span>
-            </button>
-
-            <a
-              className="oj-welcome-option oj-welcome-option--secondary"
-              href="/download"
-            >
-              <span className="oj-welcome-option-main">
-                <span className="oj-welcome-option-label">
-                  Download the desktop app
-                </span>
-                <span className="oj-welcome-option-sub">
-                  Under-5&nbsp;ms MIDI→audio, plus hosted VST3 / AU / CLAP.
-                </span>
-              </span>
-              <span className="oj-welcome-option-glyph" aria-hidden="true">
-                &darr;
-              </span>
-            </a>
-          </div>
-        </div>
-      )}
+      {/* The first run: three taps over the REAL studio, blurred behind it.
+          Suppressed in Safe Mode — two aria-modal dialogs must never co-render
+          (a held note beats a glitch: one calm surface at a time). */}
+      {!recovery.safeMode && <OnboardingHost onActivate={handleActivate} />}
 
       <div
         className={`surface-layer ${surface === 'canvas' ? 'surface-transition-in' : exitingSurface === 'canvas' ? 'surface-transition-out' : ''}`}
@@ -682,12 +630,9 @@ function App() {
         {surface === 'canvas' ? 'Canvas surface active' : surface === 'pianoroll' ? 'Piano roll surface active' : 'Arrangement surface active'}
       </div>
 
-      {/* Toolbar + Breadcrumbs */}
-      <div className="toolbar-wrapper">
-        <Toolbar />
-        <Breadcrumbs />
-        <SharedSurfaceChrome surface={surface} setSurface={setSurface} />
-      </div>
+      {/* The app shell: one rule at the top, one transport floating under it. */}
+      <Topbar onOpenSettings={() => setShowSettings(true)} />
+      <TransportPillHost onRequestAudio={handleActivate} />
 
       {/* Settings Panel */}
       {showSettings && (
@@ -723,10 +668,10 @@ function App() {
       {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}
       <PluginsPanelHost />
 
-      {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
-      <CollabControl />
-
-      {/* Help Panel */}
+      {/* Canvas companions: the beginner's one sentence, the beat rig's groove,
+          and the shortcut card whose default follows the persona. */}
+      {surface === 'canvas' && !showOnboarding && <HintBubble />}
+      {surface === 'canvas' && <StepGrid />}
       {surface === 'canvas' && <HelpPanel />}
 
       {/* MIDI Integration - device detection, browser, and node creation */}
@@ -734,8 +679,8 @@ function App() {
 
       {/* Toast Notifications */}
       <Toaster
+        theme={toastTheme}
         position="top-left"
-        richColors
         expand={true}
         visibleToasts={5}
         gap={12}

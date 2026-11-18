@@ -7,7 +7,7 @@ const rowStyle = {
     display: 'flex',
     alignItems: 'center',
     gap: 'var(--space-sm)',
-    fontFamily: 'var(--font-sketch)',
+    fontFamily: 'var(--font-sans)',
     fontSize: 'var(--text-sm)',
     color: 'var(--text-primary)',
 } as const;

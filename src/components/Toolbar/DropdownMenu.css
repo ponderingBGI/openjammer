@@ -1,178 +1,52 @@
-/**
- * DropdownMenu.css - Photoshop-style dropdown menus with sketch theme
+/*
+ * DropdownMenu — anchoring only.
+ *
+ * Every surface, hairline, keycap and hover state now comes from the oj-ui
+ * `Menu` family. What is left here is the geometry a menu component cannot know:
+ * where the panel hangs relative to its trigger, and the two small deltas the
+ * topbar's menu bar needs (a tighter ghost trigger, a chevron on a disclosure
+ * row whose submenu is closed).
  */
 
 .dropdown-menu {
     position: relative;
-    display: inline-flex;
-    flex-shrink: 0;
+    display: inline-block;
 }
 
+/* The File / Edit / View trigger: a quiet ghost button in the topbar rule. */
 .dropdown-trigger {
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
-    border: none;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-md);
+    padding: 5px 10px;
+    font-size: var(--text-sm);
     font-weight: 500;
-    color: var(--text-primary);
-    background: transparent;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    white-space: nowrap;
+    color: var(--text-secondary);
 }
 
-.dropdown-trigger:hover {
-    background: var(--bg-tertiary);
-}
-
-.dropdown-trigger:active {
-    background: var(--bg-tertiary);
-}
-
-.dropdown-trigger:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
+.dropdown-trigger:hover,
 .dropdown-trigger-open {
+    color: var(--text-primary);
     background: var(--bg-tertiary);
 }
 
-.dropdown-chevron {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    transition: transform var(--transition-fast);
-}
-
-.dropdown-trigger-open .dropdown-chevron {
-    transform: rotate(180deg);
-}
-
-/* Dropdown Content */
 .dropdown-content {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 6px);
     left: 0;
-    margin-top: var(--space-xs);
-    min-width: 180px;
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
-    z-index: 1000;
-    animation: dropdownFadeIn 0.1s ease;
-    overflow: hidden;
-    will-change: opacity, transform;
+    min-width: 210px;
+    z-index: var(--z-popover);
 }
 
-@keyframes dropdownFadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-4px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* Menu Items */
-.dropdown-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    outline: none;
-}
-
-.dropdown-item:hover,
-.dropdown-item-focused {
-    background: var(--accent-primary);
-    color: white;
-}
-
-.dropdown-item:hover .dropdown-item-shortcut,
-.dropdown-item-focused .dropdown-item-shortcut {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.dropdown-item-disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.dropdown-item-disabled:hover,
-.dropdown-item-disabled.dropdown-item-focused {
-    background: transparent;
-    color: var(--text-primary);
-}
-
-.dropdown-item-label {
-    flex: 1;
-}
-
-.dropdown-item-shortcut {
-    margin-left: var(--space-lg);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
+/* A closed disclosure still says it has more behind it. */
+.dropdown-item-has-submenu:not([aria-expanded='true']) .oj-menu-item__label::after {
+    content: '›';
+    margin-left: 8px;
     color: var(--text-muted);
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-}
-
-.dropdown-item:hover .dropdown-item-shortcut,
-.dropdown-item-focused .dropdown-item-shortcut {
-    opacity: 1;
-}
-
-/* Separator */
-.dropdown-separator {
-    height: 1px;
-    background: var(--border-subtle);
-    margin: var(--space-xs) 0;
-}
-
-/* Submenu Support */
-.dropdown-item-has-submenu {
-    position: relative;
-}
-
-.dropdown-submenu-chevron {
-    margin-left: var(--space-sm);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-}
-
-.dropdown-item:hover .dropdown-submenu-chevron,
-.dropdown-item-focused .dropdown-submenu-chevron {
-    color: rgba(255, 255, 255, 0.8);
 }
 
 .dropdown-submenu {
     position: absolute;
+    top: -6px;
     left: 100%;
-    top: 0;
-    margin-left: 2px;
-    min-width: 180px;
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
-    z-index: 1001;
-    animation: dropdownFadeIn 0.1s ease;
-    overflow: hidden;
-}
-
-.dropdown-submenu .dropdown-item {
-    padding: var(--space-sm) var(--space-md);
+    min-width: 200px;
+    margin-left: 4px;
+    z-index: var(--z-popover);
 }

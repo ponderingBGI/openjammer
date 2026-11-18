@@ -18,7 +18,7 @@ export const Inline: Story = () => (
             display: 'flex',
             gap: 'var(--space-sm)',
             alignItems: 'center',
-            fontFamily: 'var(--font-sketch)',
+            fontFamily: 'var(--font-sans)',
             color: 'var(--text-secondary)',
         }}
     >

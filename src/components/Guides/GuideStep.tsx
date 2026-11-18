@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { Spinner } from '@openjammer/oj-ui';
 import './Guide.css';
+import type { StepStatus } from './guideTypes';
 
-export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+export type { StepStatus } from './guideTypes';
 
 interface GuideStepProps {
   stepNumber: number;
@@ -10,17 +12,28 @@ interface GuideStepProps {
   status: StepStatus;
   children?: React.ReactNode;
   defaultExpanded?: boolean;
-  onStatusChange?: (status: StepStatus) => void;
 }
 
+const stepStatusClass = (status: StepStatus): string =>
+  status === 'in_progress' ? 'in-progress' : status;
+
+/** Announced beside the number so status is never colour alone. */
+const STATUS_LABEL: Record<StepStatus, string> = {
+  pending: 'Not started',
+  in_progress: 'In progress',
+  completed: 'Done',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
+
 /**
- * GuideStep - An individual step in a guide
+ * GuideStep — one step in a guide.
  *
- * Features:
- * - Visual status indicator (pending, in_progress, completed, failed, skipped)
- * - Expandable/collapsible content
- * - Step number display
- * - Animated transitions
+ * A disclosure row: a status marker (the step number, a tick, a cross, a dash,
+ * or the shared oj-ui Spinner while a step is running), the title + description,
+ * and a chevron when the step carries content. `in_progress` is the one state
+ * that draws the eye: the marker takes the accent fill and the row lifts onto
+ * the node surface, because that is the step you are meant to be doing.
  */
 export function GuideStep({
   stepNumber,
@@ -39,8 +52,13 @@ export function GuideStep({
   };
 
   return (
-    <div className={`guide-step ${status}`}>
-      <div className="guide-step-header" onClick={toggleExpanded}>
+    <div className={`guide-step ${stepStatusClass(status)}`}>
+      <button
+        type="button"
+        className="guide-step-header"
+        onClick={toggleExpanded}
+        aria-expanded={children ? isExpanded : undefined}
+      >
         <StepStatusIndicator status={status} stepNumber={stepNumber} />
 
         <div className="guide-step-info">
@@ -55,7 +73,7 @@ export function GuideStep({
             <ChevronDownIcon />
           </div>
         )}
-      </div>
+      </button>
 
       {children && isExpanded && (
         <div className="guide-step-content">
@@ -75,7 +93,7 @@ function StepStatusIndicator({ status, stepNumber }: { status: StepStatus; stepN
       case 'failed':
         return <XIcon />;
       case 'in_progress':
-        return <SpinnerIcon />;
+        return <Spinner size={14} />;
       case 'skipped':
         return <MinusIcon />;
       default:
@@ -84,7 +102,8 @@ function StepStatusIndicator({ status, stepNumber }: { status: StepStatus; stepN
   };
 
   return (
-    <div className={`guide-step-status ${status}`}>
+    <div className={`guide-step-status ${stepStatusClass(status)}`} title={STATUS_LABEL[status]}>
+      <span className="sr-only">{STATUS_LABEL[status]}</span>
       {content()}
     </div>
   );
@@ -116,14 +135,6 @@ function MinusIcon() {
   );
 }
 
-function SpinnerIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="guide-spinner">
-      <path d="M21 12a9 9 0 11-6.219-8.56" />
-    </svg>
-  );
-}
-
 function ChevronDownIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -131,5 +142,3 @@ function ChevronDownIcon() {
     </svg>
   );
 }
-
-export default GuideStep;

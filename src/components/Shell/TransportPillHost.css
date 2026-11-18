@@ -1,0 +1,67 @@
+/*
+ * Where the one transport floats.
+ *
+ * Top-centre over the stage, 6px under the topbar rule — the SAME rule on every
+ * surface, so a performer's eye never has to look for it twice. Ruled surfaces
+ * reserve a sky band above their ruler so the pill never occludes a bar; that is
+ * the surface's job, not the pill's.
+ *
+ * The wrapper is pointer-transparent so the canvas underneath still receives a
+ * marquee drag that starts beside the pill; only the pill itself takes input.
+ */
+
+.oj-transport-host {
+    position: fixed;
+    top: calc(var(--oj-topbar-height) + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-panel);
+    pointer-events: none;
+}
+
+.oj-transport-host > * {
+    pointer-events: auto;
+}
+
+/*
+ * THE TRANSPORT'S OWN WARNING.
+ *
+ * When the engine does not answer, the pill shows Play — the glyph waits for the
+ * engine — and that alone cannot distinguish "stopped" from "asked, and heard
+ * nothing back". The dot does: `--warning-ink`, on the button itself, because
+ * the pill is the one place a performer looks to ask whether it is running, and
+ * a report that lands anywhere else is a report they will not read mid-set.
+ *
+ * It rides `::before` because `::after` on this button is already the cold-load
+ * attention pulse, and both may briefly be true.
+ */
+.oj-transport-host[data-transport-fault='true'] .oj-transport__play::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning-ink);
+    box-shadow: 0 0 0 1.5px var(--bg-node);
+    pointer-events: none;
+}
+
+/*
+ * The ONE live announcement of a transport fault on the surfaces the sky band
+ * cannot reach (it lives inside the arrangement, which is `inert` and
+ * `aria-hidden` whenever the canvas is active). Empty at rest, `polite`, and
+ * off-screen: a report must be heard without stealing the moment. The button's
+ * own `aria-describedby` carries the same sentence for anyone who lands on it.
+ */
+.oj-transport-host__reason {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}

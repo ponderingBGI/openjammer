@@ -1,5 +1,6 @@
 import type { GlobalProvider } from '@ladle/react'
 import { useEffect } from 'react'
+import '../src/styles/fonts.css'
 // Token primitives (:root vars) + the runtime theme engine — the same source
 // the app uses, so the catalog renders components exactly as they ship.
 import '../packages/oj-tokens/dist/variables.css'
@@ -14,7 +15,7 @@ export const argTypes = {
     ojTheme: {
         control: { type: 'select' },
         options: themes.map((t) => t.id),
-        defaultValue: 'cream',
+        defaultValue: 'light',
     },
 }
 
@@ -30,7 +31,7 @@ for (const c of componentMap.components) {
 
 export const Provider: GlobalProvider = ({ children, globalState }) => {
     const raw = globalState.control?.ojTheme?.value
-    const themeId = typeof raw === 'string' ? raw : 'cream'
+    const themeId = typeof raw === 'string' ? raw : 'light'
 
     useEffect(() => {
         const theme = getThemeById(themeId) ?? themes[0]
@@ -47,7 +48,7 @@ export const Provider: GlobalProvider = ({ children, globalState }) => {
                 padding: 'var(--space-lg)',
                 background: 'var(--bg-canvas)',
                 color: 'var(--text-primary)',
-                fontFamily: 'var(--font-sketch)',
+                fontFamily: 'var(--font-sans)',
             }}
         >
             {figma && (
@@ -66,13 +67,13 @@ export const Provider: GlobalProvider = ({ children, globalState }) => {
                         gap: 'var(--space-xs)',
                         padding: 'var(--space-xs) var(--space-sm)',
                         borderRadius: 'var(--radius-sm)',
-                        border: 'var(--border-sketch-width) solid var(--sketch-black)',
+                        border: '1px solid var(--border-subtle)',
                         background: 'var(--bg-node)',
                         color: 'var(--text-primary)',
-                        fontFamily: 'var(--font-sketch)',
+                        fontFamily: 'var(--font-sans)',
                         fontSize: 'var(--text-sm)',
                         textDecoration: 'none',
-                        boxShadow: 'var(--shadow-node)',
+                        boxShadow: 'var(--shadow-raised)',
                     }}
                 >
                     ◈ View in Figma ↗

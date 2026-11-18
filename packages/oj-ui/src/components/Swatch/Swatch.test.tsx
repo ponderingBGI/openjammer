@@ -6,7 +6,7 @@ describe('Swatch', () => {
     it('renders the base class, name and defaults to type=button', () => {
         const { container } = render(<Swatch bg="#fff" node="#eee" name="Sketchbook" />);
         const btn = container.querySelector('button')!;
-        expect(btn.className).toBe('oj-swatch');
+        expect(btn.className).toContain('oj-swatch');
         expect(btn.getAttribute('type')).toBe('button');
         expect(container.querySelector('.oj-swatch__name')!.textContent).toBe('Sketchbook');
     });

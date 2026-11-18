@@ -175,11 +175,6 @@ export function createDefaultInternalStructure(parentNode: GraphNode): InternalS
         case 'keyboard':
             return createKeyboardInternals();
 
-        case 'piano':
-        case 'cello':
-        case 'electricCello':
-        case 'violin':
-        case 'saxophone':
         case 'strings':
         case 'keys':
         case 'winds':
@@ -454,7 +449,7 @@ function createInstrumentInternals(): InternalStructure {
         data: {},
         ports: [
             // Only audio output - key input ports are added dynamically per bundle
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         parentId: null,
         childIds: []
@@ -471,11 +466,11 @@ function createInstrumentInternals(): InternalStructure {
         position: { x: 800, y: 150 },
         data: {
             portLabels: {
-                'audio-out': 'Audio'
+                'audio-out': 'Out'
             }
         },
         ports: [
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } }
         ],
         parentId: null,
         childIds: []
@@ -1228,7 +1223,7 @@ function createSamplerInternals(): InternalStructure {
         data: {},  // Inherits from parent sampler node via parentId
         ports: [
             // Only audio output - key input ports are added dynamically per bundle
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         parentId: null,
         childIds: []
@@ -1245,11 +1240,11 @@ function createSamplerInternals(): InternalStructure {
         position: { x: 800, y: 150 },
         data: {
             portLabels: {
-                'audio-out': 'Audio'
+                'audio-out': 'Out'
             }
         },
         ports: [
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } }
         ],
         parentId: null,
         childIds: []

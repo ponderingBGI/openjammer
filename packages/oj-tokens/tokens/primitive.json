@@ -11,45 +11,41 @@
     "md": { "$value": "10px", "$type": "dimension" },
     "lg": { "$value": "14px", "$type": "dimension" },
     "xl": { "$value": "20px", "$type": "dimension" },
-    "pill": { "$value": "50px", "$type": "dimension" }
+    "pill": { "$value": "99px", "$type": "dimension" }
   },
   "text": {
-    "xs": { "$value": "14px", "$type": "dimension" },
-    "sm": { "$value": "16px", "$type": "dimension" },
-    "md": { "$value": "18px", "$type": "dimension" },
-    "lg": { "$value": "22px", "$type": "dimension" },
-    "xl": { "$value": "28px", "$type": "dimension" },
-    "2xl": { "$value": "36px", "$type": "dimension" }
+    "micro": { "$value": "9.5px", "$type": "dimension" },
+    "xs": { "$value": "11px", "$type": "dimension" },
+    "sm": { "$value": "13px", "$type": "dimension" },
+    "md": { "$value": "14px", "$type": "dimension" },
+    "lg": { "$value": "15px", "$type": "dimension" },
+    "xl": { "$value": "22px", "$type": "dimension" },
+    "2xl": { "$value": "30px", "$type": "dimension" }
   },
   "font": {
-    "sketch": { "$value": "'Caveat', 'Comic Sans MS', cursive", "$type": "fontFamily" },
-    "sans": { "$value": "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", "$type": "fontFamily" },
+    "sans": { "$value": "'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif", "$type": "fontFamily" },
     "mono": { "$value": "'JetBrains Mono', 'Fira Code', monospace", "$type": "fontFamily" }
   },
   "node": {
-    "min-width": { "$value": "180px", "$type": "dimension" },
-    "header-height": { "$value": "40px", "$type": "dimension" }
+    "min-width": { "$value": "190px", "$type": "dimension" }
   },
   "port": {
-    "size": { "$value": "16px", "$type": "dimension" },
-    "spacing": { "$value": "28px", "$type": "dimension" }
+    "size": { "$value": "18px", "$type": "dimension" }
   },
   "transition": {
-    "fast": { "$value": "0.15s ease" },
-    "normal": { "$value": "0.25s ease" },
+    "normal": { "$value": "250ms ease" },
     "slow": { "$value": "0.4s ease" }
   },
-  "shadow": {
-    "node": { "$value": "2px 3px 0 rgba(0, 0, 0, 0.1)" },
-    "menu": { "$value": "3px 4px 0 rgba(0, 0, 0, 0.15)" },
-    "sketch": { "$value": "2px 2px 0 var(--sketch-black)" }
+  "motion": {
+    "fast": { "$value": "120ms cubic-bezier(.2,.8,.3,1)" },
+    "spring": { "$value": "260ms cubic-bezier(.34,1.56,.64,1)" }
   },
-  "border": {
-    "sketch-width": { "$value": "2px", "$type": "dimension" }
-  },
-  "overlay": {
-    "scrim": { "$value": "rgba(0, 0, 0, 0.45)" }
-  },
+  "tracking": { "micro": { "$value": "0.08em" } },
+  "press-scale-btn": { "$value": "0.96" },
+  "press-scale-pad": { "$value": "0.94" },
+  "hover-lift": { "$value": "-2px", "$type": "dimension" },
+  "knob-size": { "$value": "52px", "$type": "dimension" },
+  "key-tile-size": { "$value": "48px", "$type": "dimension" },
   "z": {
     "node": { "$value": "10" },
     "panel": { "$value": "100" },

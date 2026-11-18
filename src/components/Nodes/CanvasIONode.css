@@ -1,0 +1,54 @@
+/* CanvasIONode — the two container connectors (`canvas-input`, `canvas-output`).
+ *
+ * The panel half of this file is gone: the input/output PANELS are now one
+ * component with its own stylesheet (`PortPanelNode.css`), and the bespoke
+ * `flash-red` keyframe is gone with them — refusal is one shared treatment in
+ * `SchematicBase.css`, so every node that refuses something refuses it the same
+ * way.
+ *
+ * What is left is the smallest card on the canvas: a renameable title, one
+ * socket, and a line saying which way it points.
+ *
+ * Rebuilt in W5-P6. */
+
+/* Just under the shared 190px floor — a connector is the smallest card there
+   is. `min-width` has to be restated or `.oj-node`'s floor wins. */
+.oj-node.canvas-io-node {
+    width: 184px;
+    min-width: 184px;
+}
+
+/* The port name IS the title, so the field inherits the header's voice rather
+   than declaring a second one. While it is open the header stops dragging. */
+.io-title {
+    display: block;
+    min-width: 0;
+}
+
+.io-title .oj-editable-label {
+    width: 100%;
+}
+
+.io-title .oj-editable-label__text,
+.io-title .oj-input {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.2;
+}
+
+.io-title .oj-editable-label__text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* What this connector will look like from the level above. */
+.io-hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-muted);
+}

@@ -1,9 +1,4 @@
-/*
- * Modal — the single overlay dialog (replaces the hand-rolled overlays). A
- * fixed full-viewport scrim washes the canvas with --overlay-scrim (no blur —
- * the Hard-Shadow Rule forbids backdrop-filter) and flex-aligns a lifted
- * Surface panel. Styled only via semantic tokens, so it follows the theme.
- */
+
 .oj-modal__scrim {
     position: fixed;
     inset: 0;
@@ -12,6 +7,13 @@
     justify-content: center;
     padding: var(--space-lg);
     background: var(--overlay-scrim);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .oj-modal__scrim {
+        -webkit-backdrop-filter: blur(14px) saturate(1.1);
+        backdrop-filter: blur(14px) saturate(1.1);
+    }
 }
 
 /* Vertical placement of the panel within the scrim. */
@@ -35,6 +37,29 @@
     max-height: calc(100vh - 2 * var(--space-lg));
     overflow: auto;
     outline: none;
+    animation: oj-modal-rise var(--motion-spring),
+        oj-modal-fade 260ms cubic-bezier(.2, .8, .3, 1);
+}
+
+@keyframes oj-modal-rise {
+    from { transform: translateY(14px); }
+    to { transform: translateY(0); }
+}
+
+@keyframes oj-modal-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce) {
+    .oj-modal__scrim {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    .oj-modal {
+        animation: none;
+    }
 }
 
 /* Size steps as relative (rem) ceilings — anchored to the type scale, not raw

@@ -32,6 +32,7 @@ import {
     toCrdtNode,
     type GraphSnapshot,
 } from './types';
+import { migrateLegacyInstrumentNode } from '../engine/nodeTypeMigrations';
 
 /**
  * The slice of the graph store the bridge needs. Kept structural so the bridge
@@ -177,7 +178,9 @@ export class GraphStoreBridge implements AiCollabFrameTarget {
             const newNodes = new Map<string, GraphNode>();
             const rootNodeIds: string[] = [];
             for (const cn of snapshot.nodes) {
-                const node = fromCrdtNode(cn);
+                // A peer on a pre-W6-P11 build can still push a deleted fixed-voice
+                // type into the shared doc — see engine/nodeTypeMigrations.
+                const node = migrateLegacyInstrumentNode(fromCrdtNode(cn));
                 newNodes.set(node.id, node);
                 if (node.parentId === null) rootNodeIds.push(node.id);
             }

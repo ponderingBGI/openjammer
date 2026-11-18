@@ -1,27 +1,34 @@
+
 /*
- * WaveformView — a clip preview card. Sketch border, --radius-md, the hard
- * sketch shadow (offset of solid ink, zero blur — Hard-Shadow Rule). The name
- * is Caveat (Caveat-Is-the-Voice) and truncates; the duration is mono
- * (Mono-Means-Exact). Selected/drop-target states are hard accent rings drawn
- * with box-shadow at 0 blur — color is the feedback, nothing reflows
- * (No-Surprise Rule). Styled only via semantic tokens, so it follows the theme.
+ * A CLIP EDGE IS A CONTENT BOUNDARY, NOT CHROME (DESIGN.md §2).
+ *
+ * `--border-subtle` is the hairline between two pieces of chrome; on this card
+ * it measured 1.31:1 light / 1.27:1 dark against the node ground it sits on,
+ * i.e. the boundary of the one object on screen that IS the audio was
+ * invisible. WCAG 1.4.11 puts a 3:1 floor under a non-text boundary that
+ * carries meaning, and the timeline already names the token for exactly this
+ * edge — the same clip, drawn in the arrangement (W5-P7-REVIEW claim 1).
  */
 .oj-waveform-view {
     display: flex;
     flex-direction: column;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--border-sketch);
+    border: 1px solid var(--timeline-clip-border);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-sketch);
+    box-shadow: var(--shadow-raised);
     overflow: hidden;
     cursor: grab;
     user-select: none;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
-        opacity var(--transition-fast);
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast),
+        color var(--motion-fast), transform var(--motion-spring);
 }
 
 .oj-waveform-view:active {
     cursor: grabbing;
+}
+
+.oj-waveform-view:hover {
+    border-color: var(--border-strong);
 }
 
 /* The waveform sits on the canvas tone; the duration/crop badges overlay it. */
@@ -49,22 +56,34 @@
     border-radius: var(--radius-sm);
 }
 
-/* Cropped marker — a quiet warning glyph, label-bearing (Signal-Not-Brand). */
+/*
+ * Cropped marker — a quiet, Chip-like inset status badge.
+ *
+ * The MICRO MONO voice, not 11px sans: this is a one-word status stamp, exactly
+ * what DESIGN's two sub-13px steps exist for, and its own sibling one rule up
+ * (`__duration`) is already mono at the same size. It was the odd run out.
+ */
 .oj-waveform-view__crop {
     position: absolute;
     bottom: var(--space-xs);
     left: var(--space-xs);
-    font-size: var(--text-xs);
-    line-height: 1;
-    color: var(--accent-warning);
+    padding: 3px 7px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--warning-ink);
+    font: 600 var(--text-xs)/1 var(--font-mono);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
 }
 
-/* The clip name — Caveat, the hand-drawn voice, truncated to one line. */
+
 .oj-waveform-view__name {
     padding: var(--space-xs) var(--space-sm);
     border-top: 1px solid var(--border-subtle);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
+    font-weight: 500;
     color: var(--text-secondary);
     text-align: center;
     white-space: nowrap;
@@ -72,24 +91,25 @@
     text-overflow: ellipsis;
 }
 
-/* Selected — a hard accent ring (0 blur) in the audio-connected wiring color. */
+
 .oj-waveform-view.is-selected {
-    border-color: var(--audio-connected);
-    box-shadow: 0 0 0 2px var(--audio-connected);
+    outline: 1.5px solid var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 .oj-waveform-view.is-selected .oj-waveform-view__name {
-    color: var(--audio-connected);
+    color: var(--accent-ink);
 }
 
-/* Drop target — a hard success ring (0 blur); color carries the meaning. */
+
 .oj-waveform-view.is-drop-target {
-    border-color: var(--accent-success);
-    box-shadow: 0 0 0 2px var(--accent-success);
+    outline: 1.5px dashed var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 /* Dragging — dim the source so the drag layer reads as the live copy. */
 .oj-waveform-view.is-dragging {
-    opacity: 0.6;
+    box-shadow: var(--shadow-overlay);
+    transform: scale(0.96);
     cursor: grabbing;
 }

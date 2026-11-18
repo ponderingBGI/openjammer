@@ -1,18 +1,20 @@
 /**
- * DropdownMenu - Photoshop-style dropdown menus for toolbar
+ * DropdownMenu — the topbar's File / Edit / View trigger.
+ *
+ * The PANEL is the oj-ui `Menu` family: one menu vocabulary in the app, one set
+ * of physics, one keyboard model (arrows / Home / End live inside `Menu`, Enter
+ * and Space inside the row). This component owns only what a menu component
+ * cannot: whether it is open, where it is anchored, and the Escape / Tab /
+ * click-outside teardown that hands focus back to the trigger.
  *
  * @security XSS Considerations:
- * - The `label` prop on MenuItem is rendered directly as text content
- * - The `label` prop on DropdownMenuProps is used for aria-label and button text
- * - The `shortcut` prop is rendered directly as text content
- *
- * If labels or shortcuts are sourced from user input or external APIs,
- * they MUST be sanitized before being passed to this component.
- * Currently, all labels are hardcoded in the codebase and are safe.
+ * - `label` and `shortcut` are rendered as text content.
+ * If they are ever sourced from user input or an external API they MUST be
+ * sanitized first. Today every label is hardcoded in the codebase and safe.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import { Button, Menu, MenuItem, MenuSeparator } from '@openjammer/oj-ui';
 import './DropdownMenu.css';
 
 /**
@@ -24,7 +26,7 @@ import './DropdownMenu.css';
  * @property disabled - Whether the item is disabled
  * @property submenu - Optional nested submenu items
  */
-export interface MenuItem {
+export interface MenuItemConfig {
     id: string;
     label: string;
     shortcut?: string;
@@ -33,11 +35,11 @@ export interface MenuItem {
     submenu?: MenuItemOrSeparator[];
 }
 
-export interface MenuSeparator {
+export interface MenuSeparatorConfig {
     type: 'separator';
 }
 
-export type MenuItemOrSeparator = MenuItem | MenuSeparator;
+export type MenuItemOrSeparator = MenuItemConfig | MenuSeparatorConfig;
 
 interface DropdownMenuProps {
     label: string;
@@ -45,144 +47,151 @@ interface DropdownMenuProps {
     disabled?: boolean;
 }
 
-function isSeparator(item: MenuItemOrSeparator): item is MenuSeparator {
+function isSeparator(item: MenuItemOrSeparator): item is MenuSeparatorConfig {
     return 'type' in item && item.type === 'separator';
 }
 
+/** The rows arrow navigation can land on — enabled, direct children only. */
+const ENABLED_ROW = '.oj-menu > .oj-menu-item:not([aria-disabled="true"])';
+
 export function DropdownMenu({ label, items, disabled = false }: DropdownMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
-    const [focusedIndex, setFocusedIndex] = useState(-1);
     const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
+    const [focusedId, setFocusedId] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
-    const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-    // Get only actionable items (not separators) for keyboard navigation
-    const actionableItems = items.filter((item): item is MenuItem => !isSeparator(item));
+    const actionableItems = items.filter((item): item is MenuItemConfig => !isSeparator(item));
 
     const close = useCallback((restoreFocus = false) => {
         setIsOpen(false);
-        setFocusedIndex(-1);
         setOpenSubmenuId(null);
-        if (restoreFocus) {
-            // Restore focus to trigger button when closing via Escape or Enter/Space
-            triggerRef.current?.focus();
-        }
+        setFocusedId(null);
+        if (restoreFocus) triggerRef.current?.focus();
     }, []);
 
     const open = useCallback(() => {
-        if (!disabled) {
-            setIsOpen(true);
-            setFocusedIndex(0);
-        }
-    }, [disabled]);
+        if (disabled) return;
+        setIsOpen(true);
+        setFocusedId(actionableItems[0]?.id ?? null);
+    }, [disabled, actionableItems]);
 
     const toggle = useCallback(() => {
-        if (isOpen) {
-            close();
-        } else {
-            open();
-        }
+        if (isOpen) close();
+        else open();
     }, [isOpen, close, open]);
 
-    // Close on click outside
+    // Close on click outside.
     useEffect(() => {
         if (!isOpen) return;
-
-        function handleClickOutside(e: MouseEvent) {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        function handleClickOutside(e: PointerEvent) {
+            if (!menuRef.current?.contains(e.target as Node) && !triggerRef.current?.contains(e.target as Node)) {
                 close();
             }
         }
-
-        // Small delay to prevent immediate close when clicking trigger
-        const timeoutId = setTimeout(() => {
-            document.addEventListener('mousedown', handleClickOutside);
-        }, 0);
-
-        return () => {
-            clearTimeout(timeoutId);
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
+        document.addEventListener('pointerdown', handleClickOutside);
+        return () => document.removeEventListener('pointerdown', handleClickOutside);
     }, [isOpen, close]);
 
-    // Keyboard navigation
+    // Land focus on the first row when the panel opens, so the arrows the `Menu`
+    // owns have somewhere to start from.
     useEffect(() => {
         if (!isOpen) return;
+        menuRef.current?.querySelector<HTMLElement>(ENABLED_ROW)?.focus();
+    }, [isOpen]);
 
+    /**
+     * Escape and Tab are the only keys this component still owns — Escape means
+     * "give me my trigger back", Tab means "let me out of here". Arrows belong to
+     * the `Menu` panel; Enter and Space belong to the row.
+     */
+    useEffect(() => {
+        if (!isOpen) return;
         function handleKeyDown(e: KeyboardEvent) {
-            switch (e.key) {
-                case 'Escape':
-                    e.preventDefault();
-                    close(true); // Restore focus to trigger
-                    break;
-
-                case 'ArrowDown':
-                    e.preventDefault();
-                    setFocusedIndex((prev) => {
-                        const next = prev + 1;
-                        return next >= actionableItems.length ? 0 : next;
-                    });
-                    break;
-
-                case 'ArrowUp':
-                    e.preventDefault();
-                    setFocusedIndex((prev) => {
-                        const next = prev - 1;
-                        return next < 0 ? actionableItems.length - 1 : next;
-                    });
-                    break;
-
-                case 'Enter':
-                case ' ':
-                    e.preventDefault();
-                    if (focusedIndex >= 0 && focusedIndex < actionableItems.length) {
-                        const item = actionableItems[focusedIndex];
-                        if (!item.disabled && item.onClick) {
-                            item.onClick();
-                            close(true); // Restore focus after action
-                        }
-                    }
-                    break;
-
-                case 'Tab':
-                    close(false); // Don't restore focus, allow natural tab flow
-                    break;
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                close(true);
+            } else if (e.key === 'Tab') {
+                close(false);
             }
         }
-
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, focusedIndex, actionableItems, close]);
+    }, [isOpen, close]);
 
-    // Focus the current item when focused index changes
-    useEffect(() => {
-        if (isOpen && focusedIndex >= 0) {
-            itemRefs.current[focusedIndex]?.focus();
+    const activate = (item: MenuItemConfig) => {
+        if (item.disabled) return;
+        if (item.submenu) {
+            setOpenSubmenuId(openSubmenuId === item.id ? null : item.id);
+            return;
         }
-    }, [isOpen, focusedIndex]);
-
-    const handleItemClick = (item: MenuItem) => {
-        if (!item.disabled) {
-            if (item.submenu) {
-                // Toggle submenu on click
-                setOpenSubmenuId(openSubmenuId === item.id ? null : item.id);
-            } else if (item.onClick) {
-                item.onClick();
-                close();
-            }
-        }
+        item.onClick?.();
+        close();
     };
 
-    const handleSubmenuItemClick = (subItem: MenuItem) => {
-        if (!subItem.disabled && subItem.onClick) {
-            subItem.onClick();
-            close();
-        }
-    };
+    const renderRow = (item: MenuItemConfig) => {
+        const hasSubmenu = Boolean(item.submenu);
+        const isSubmenuOpen = openSubmenuId === item.id;
+        const classes = [
+            'dropdown-item',
+            focusedId === item.id && 'dropdown-item-focused',
+            item.disabled && 'dropdown-item-disabled',
+            hasSubmenu && 'dropdown-item-has-submenu',
+        ]
+            .filter(Boolean)
+            .join(' ');
 
-    // Track which actionable item index corresponds to each menu item
-    let actionableIndex = -1;
+        // A row is EITHER a leaf (onSelect fires it) or a disclosure (onClick
+        // toggles it). Never both — wiring both would fire the action twice.
+        const rowHandlers = hasSubmenu
+            ? { onClick: () => activate(item) }
+            : { onSelect: () => activate(item) };
+
+        return (
+            <MenuItem
+                key={item.id}
+                className={classes}
+                label={item.label}
+                shortcut={item.shortcut}
+                disabled={item.disabled}
+                aria-expanded={hasSubmenu ? isSubmenuOpen : undefined}
+                onFocus={() => setFocusedId(item.id)}
+                onMouseEnter={() => {
+                    setFocusedId(item.id);
+                    setOpenSubmenuId(hasSubmenu ? item.id : null);
+                }}
+                {...rowHandlers}
+                submenu={
+                    hasSubmenu && isSubmenuOpen ? (
+                        <Menu
+                            ariaLabel={item.label}
+                            className="dropdown-submenu"
+                            onEscape={() => setOpenSubmenuId(null)}
+                        >
+                            {item.submenu!.map((subItem, subIndex) =>
+                                isSeparator(subItem) ? (
+                                    <MenuSeparator key={`sub-sep-${subIndex}`} />
+                                ) : (
+                                    <MenuItem
+                                        key={subItem.id}
+                                        className={`dropdown-item${subItem.disabled ? ' dropdown-item-disabled' : ''}`}
+                                        label={subItem.label}
+                                        shortcut={subItem.shortcut}
+                                        disabled={subItem.disabled}
+                                        onSelect={() => {
+                                            if (subItem.disabled) return;
+                                            subItem.onClick?.();
+                                            close();
+                                        }}
+                                    />
+                                ),
+                            )}
+                        </Menu>
+                    ) : undefined
+                }
+            />
+        );
+    };
 
     return (
         <div className="dropdown-menu" ref={menuRef}>
@@ -196,83 +205,14 @@ export function DropdownMenu({ label, items, disabled = false }: DropdownMenuPro
                 aria-expanded={isOpen}
             >
                 {label}
-                <span className="dropdown-chevron">▾</span>
             </Button>
 
             {isOpen && (
-                <div
-                    className="dropdown-content"
-                    role="menu"
-                    aria-label={label}
-                >
-                    {items.map((item, index) => {
-                        if (isSeparator(item)) {
-                            return <div key={`sep-${index}`} className="dropdown-separator" role="separator" />;
-                        }
-
-                        actionableIndex++;
-                        const currentActionableIndex = actionableIndex;
-
-                        const hasSubmenu = !!item.submenu;
-                        const isSubmenuOpen = openSubmenuId === item.id;
-
-                        return (
-                            <div
-                                key={item.id}
-                                ref={(el) => { itemRefs.current[currentActionableIndex] = el; }}
-                                className={`dropdown-item ${item.disabled ? 'dropdown-item-disabled' : ''} ${currentActionableIndex === focusedIndex ? 'dropdown-item-focused' : ''} ${hasSubmenu ? 'dropdown-item-has-submenu' : ''}`}
-                                onClick={() => handleItemClick(item)}
-                                onMouseEnter={() => {
-                                    setFocusedIndex(currentActionableIndex);
-                                    if (hasSubmenu) {
-                                        setOpenSubmenuId(item.id);
-                                    } else {
-                                        setOpenSubmenuId(null);
-                                    }
-                                }}
-                                role="menuitem"
-                                tabIndex={-1}
-                                aria-disabled={item.disabled}
-                                aria-haspopup={hasSubmenu}
-                                aria-expanded={hasSubmenu ? isSubmenuOpen : undefined}
-                            >
-                                <span className="dropdown-item-label">{item.label}</span>
-                                {item.shortcut && (
-                                    <span className="dropdown-item-shortcut">{item.shortcut}</span>
-                                )}
-                                {hasSubmenu && (
-                                    <span className="dropdown-submenu-chevron">▸</span>
-                                )}
-                                {hasSubmenu && isSubmenuOpen && item.submenu && (
-                                    <div className="dropdown-submenu" role="menu">
-                                        {item.submenu.map((subItem, subIndex) => {
-                                            if (isSeparator(subItem)) {
-                                                return <div key={`sub-sep-${subIndex}`} className="dropdown-separator" role="separator" />;
-                                            }
-                                            return (
-                                                <div
-                                                    key={subItem.id}
-                                                    className={`dropdown-item ${subItem.disabled ? 'dropdown-item-disabled' : ''}`}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleSubmenuItemClick(subItem);
-                                                    }}
-                                                    role="menuitem"
-                                                    aria-disabled={subItem.disabled}
-                                                >
-                                                    <span className="dropdown-item-label">{subItem.label}</span>
-                                                    {subItem.shortcut && (
-                                                        <span className="dropdown-item-shortcut">{subItem.shortcut}</span>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
+                <Menu ariaLabel={label} className="dropdown-content" onEscape={() => close(true)}>
+                    {items.map((item, index) =>
+                        isSeparator(item) ? <MenuSeparator key={`sep-${index}`} /> : renderRow(item),
+                    )}
+                </Menu>
             )}
         </div>
     );

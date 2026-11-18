@@ -1,6 +1,4 @@
-/**
- * global.css - Global styles with hand-drawn sketch theme
- */
+
 
 @import './fonts.css';
 /* Design-token primitives (--space-*, --radius-*, --text-*, fonts, etc.) are
@@ -23,62 +21,28 @@ body,
     overflow: hidden;
 }
 
-.surface-switcher {
-    display: flex;
-    padding: 3px;
-    gap: 2px;
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-sketch);
-}
-
-.shared-surface-chrome {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    flex-shrink: 0;
-}
-
-.shared-bar-beat {
-    min-width: 96px;
-    padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    background: var(--bg-node);
-    box-shadow: var(--shadow-sketch);
-    font-family: var(--font-mono);
-    font-size: 22px;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-}
-
 [data-surface-root="canvas"] {
     width: 100%;
     height: 100%;
 }
 
+/*
+ * The stage starts below the topbar. The canvas takes the whole rest of the
+ * window — the transport pill floats OVER it, which is the point. The ruled
+ * surfaces additionally reserve the pill's lane; that reservation lives beside
+ * them in `Arrangement/ArrangementSurface.css`.
+ */
 .surface-layer {
     position: fixed;
-    inset: 0;
+    inset: var(--oj-topbar-height, 46px) 0 0 0;
     transform-origin: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .surface-transition-in,
-    .surface-transition-out {
-        animation: none;
+    *:not(.oj-cable):not(.oj-meter):not(.oj-meter *), *::before, *::after {
+        animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important; scroll-behavior: auto !important;
     }
-}
-
-.surface-switcher button {
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-}
-
-.surface-switcher button[aria-pressed="true"] {
-    color: var(--bg-node);
-    background: var(--sketch-black);
 }
 
 .sr-only {
@@ -94,7 +58,7 @@ body,
 }
 
 body {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     color: var(--text-primary);
     background: var(--bg-canvas);
@@ -122,17 +86,17 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--sketch-light);
+    background: var(--text-muted);
     border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--sketch-gray);
+    background: var(--text-secondary);
 }
 
 /* Button Reset */
 button {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: inherit;
     border: none;
     background: none;
@@ -148,7 +112,7 @@ textarea {
     font-size: inherit;
     color: inherit;
     background: var(--bg-canvas);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     padding: var(--space-xs) var(--space-sm);
 }
@@ -158,176 +122,6 @@ select:focus,
 textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
-}
-
-/* Welcome screen (browser tier entry — The Living Sketchbook, fully theme-var driven) */
-.oj-welcome {
-    position: fixed;
-    inset: 0;
-    z-index: 10000;
-    display: flex;
-    align-items: flex-start;       /* scroll-safe: never clip the card top */
-    justify-content: center;
-    overflow-y: auto;
-    padding: var(--space-xl) var(--space-lg);
-    /* Wash is in the alpha of the BG only — the card/ink/shadow/text stay 100% solid.
-       No element opacity (that would bleed through the subtree → banned glassy look). */
-    background: color-mix(in srgb, var(--bg-canvas) 97%, transparent);
-}
-
-.oj-welcome-card {
-    margin: auto;                  /* center vertically; scrollable when taller than viewport */
-    width: min(480px, 100%);
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-xl);
-    background: var(--bg-node);     /* solid, opaque */
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-sketch);
-    animation: oj-welcome-in var(--transition-normal) ease-out;
-}
-
-@keyframes oj-welcome-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }   /* ends fully opaque */
-}
-
-.oj-welcome-title {
-    margin: 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-2xl);
-    line-height: 1.15;              /* > 1.05 so Caveat apostrophe descenders don't clip */
-    color: var(--text-primary);
-}
-
-.oj-welcome-intro {
-    margin: 0 0 var(--space-sm);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-}
-
-.oj-welcome-option {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--space-md) var(--space-lg);
-    text-align: left;
-    text-decoration: none;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sketch);
-    transition: transform var(--transition-fast),
-                box-shadow var(--transition-fast);
-    cursor: pointer;
-}
-
-.oj-welcome-option:hover {
-    transform: translateY(-2px);
-    box-shadow: 4px 4px 0 var(--sketch-black);   /* hard offset — no blur */
-}
-
-.oj-welcome-option:active {
-    transform: translateY(1px);
-    box-shadow: 1px 1px 0 var(--sketch-black);
-}
-
-.oj-welcome-option--primary {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-}
-
-.oj-welcome-option--secondary {
-    background: var(--bg-node-header);
-    color: var(--text-primary);
-}
-
-.oj-welcome-option-main {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    flex: 1 1 auto;
-    min-width: 0;                   /* allow the long VST3/AU/CLAP subline to wrap */
-}
-
-.oj-welcome-option-label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-lg);
-    line-height: 1.1;
-}
-
-.oj-welcome-option-sub {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    line-height: 1.3;
-    /* No blanket opacity — honesty copy stays full-strength and AA. */
-}
-
-/* Subline color per variant: full-strength on accent (honesty copy),
-   a real secondary token on the quiet row. */
-.oj-welcome-option--primary .oj-welcome-option-sub {
-    color: var(--text-on-accent);
-}
-.oj-welcome-option--secondary .oj-welcome-option-sub {
-    /* --text-primary (not --text-secondary): the smaller size + Inter face already
-       signal hierarchy, and node-surface ink clears WCAG AA on --bg-node-header in
-       every theme (the honesty/latency copy is never the dimmest pixel). */
-    color: var(--text-primary);
-}
-
-.oj-welcome-option-glyph {
-    flex: 0 0 auto;
-    font-size: var(--text-xl);
-    line-height: 1;
-}
-
-/* Safe Mode footer — quiet utility links beneath the two decision cards.
-   Additive: the welcome screen (App.tsx) shares the cards above but not this row,
-   so it stays untouched. */
-.oj-welcome-footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-sm);
-    margin-top: var(--space-sm);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border-subtle);
-}
-
-.oj-welcome-link {
-    /* Ghost text action: no border, no card fill — deliberately lighter than the
-       decision cards so the utilities recede. Resting color is --text-primary (the
-       smaller --font-sans size already signals secondary, and node-surface ink
-       clears WCAG AA in every theme — same reasoning as the option subline above). */
-    background: none;
-    border: none;
-    padding: 0;
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    line-height: 1.3;
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.oj-welcome-link:hover {
-    text-decoration: underline;
-}
-
-.oj-welcome-footer-sep {
-    color: var(--text-muted);
-    user-select: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .oj-welcome-card { animation: none; }
-    .oj-welcome-option { transition: none; }
-    .oj-welcome-option:hover { transform: none; }
 }
 
 /* Selection highlight */
@@ -342,12 +136,17 @@ textarea:focus {
     outline-offset: 2px;
 }
 
-/* Sonner toast container overrides for theme consistency */
-[data-sonner-toaster] {
-    --normal-bg: var(--bg-secondary);
-    --normal-border: var(--border-sketch);
-    --normal-text: var(--text-primary);
-    font-family: var(--font-sketch);
+/* Sonner inserts its theme sheet at runtime, so these semantic values need
+   explicit priority to remain the toast contract in both app themes. */
+[data-sonner-toaster][data-sonner-theme] {
+    --normal-bg: var(--bg-secondary) !important;
+    --normal-border: var(--border-subtle) !important;
+    --normal-text: var(--text-primary) !important;
+    font-family: var(--font-sans);
+}
+
+[data-sonner-toaster][data-sonner-theme] [data-description] {
+    color: var(--text-secondary);
 }
 
 /* Override Sonner's default toast styles when using custom toasts */

@@ -1,0 +1,375 @@
+/* LooperNode — the live-performance faceplate.
+ *
+ * The card is a NodeShell; this file only decides the geometry of the face and
+ * the one thing oj-ui cannot own: the LIVE trace, whose two SVG attributes are
+ * written by the app's shared animation frame rather than by React. Its colour
+ * language is deliberately identical to `oj-ui Waveform` (audio blue for a
+ * committed shape, danger for a live capture, accent for the playhead, a
+ * hairline axis) so the trace at the top of the card and the trace on every
+ * layer row read as one drawing.
+ *
+ * States, all distinct in both themes:
+ *   idle · armed · recording · overdubbing · playing · muted · drop-target
+ *
+ * Rebuilt in W5-P7. */
+
+.oj-node.looper-node {
+    width: 252px;
+}
+
+.looper-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+/* ---- The cycle: live trace, playhead, loop length ----------------------- */
+
+.looper-cycle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+/* The trace bed. A recessed well, exactly like a socket or an inset field, so
+   the drawing reads as something sunk into the faceplate rather than printed
+   on it. While a pass is capturing the well takes a danger hairline — the
+   quiet, always-present half of "this is live". */
+.looper-live {
+    height: 46px;
+    padding: 4px 6px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-inset), inset 0 0 0 1px var(--border-subtle);
+    overflow: hidden;
+    transition: box-shadow var(--motion-fast);
+}
+
+.looper-live.is-recording {
+    box-shadow: var(--shadow-inset), inset 0 0 0 1px var(--accent-danger);
+}
+
+.looper-live__svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.looper-live__base {
+    stroke: var(--border-subtle);
+    stroke-width: 2;
+}
+
+.looper-live__trace {
+    fill: none;
+    stroke: var(--audio-connection);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+
+.looper-live.is-recording .looper-live__trace {
+    stroke: var(--accent-danger);
+}
+
+/* Where you are in the cycle. Measured on the inset, `--accent-primary` is a
+   2.79:1 mark in light — under the 3:1 WCAG 1.4.11 floor for something you have
+   to see to read the card. So the line takes the accent's INK sibling: the same
+   hue, darkened (light) / lightened (dark) until it clears. That is the
+   Ink-For-Text Rule applied to a 2px line, and the same call DESIGN.md already
+   made for `--timeline-clip-border`. Measured after, twice and independently
+   (W5-P7's browser sweep and the P7 gate's own WCAG implementation):
+   5.34 light / 5.96 dark. */
+.looper-live__playhead {
+    stroke: var(--accent-ink);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+
+.looper-cycle__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+/* The scroll-capture wrapper around the length scrubber. It exists so the
+   native, non-passive wheel listener has an element to sit on; it must not
+   change the scrubber's own box. */
+.looper-length {
+    display: inline-flex;
+    min-width: 0;
+}
+
+/* ---- Transport ---------------------------------------------------------
+ * One filled button and two quiet ones. Record is the only control on this
+ * card that changes what the room hears NEXT, so it is the only one that gets
+ * a fill; silence and clear are node buttons like every other node button. */
+
+.looper-transport {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* Record IS an `oj-ui Button variant="danger"` — the library's own danger
+   construction (a 10% wash of `--accent-danger` under `--danger-ink`, the press
+   scale, the focus ring, the disabled fade, the font). W5-P7 forked a bare
+   `<button>` that re-declared all of it; W5-P7b gave it back, so a token change
+   in `Button.css` can no longer miss the one control on this card that changes
+   what the room hears next.
+   What is left here is only what this button has that no other Button does: it
+   fills the transport row, it is 30px tall, and it wears a danger RING so it
+   says what it will do before it is pressed. */
+.looper-record.oj-btn {
+    flex: 1;
+    min-width: 0;
+    gap: var(--space-xs);
+    height: 30px;
+    padding: 0 var(--space-sm);
+    box-shadow: inset 0 0 0 1px var(--accent-danger);
+}
+
+.looper-record.oj-btn:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--accent-danger), var(--focus-ring);
+}
+
+.looper-record.oj-btn:disabled {
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+/* Capturing: the hairline ring becomes a DOUBLE ring over a danger wash. The
+   whole control changes state, which is legible from across a room and from the
+   corner of an eye, while the word on it stays `--danger-ink` on a tint.
+   That pairing is the library's own danger construction ("a wash of the state
+   colour with --danger-ink text, never a solid alarm fill") — and it is also the
+   only one that clears AA: measured in the browser, `--text-on-accent` on a
+   solid `--accent-danger` is 3.01:1 in light. A label a performer cannot read is
+   not a state.
+   The 1200ms breath rides on top. Stilled (reduced motion), the wash and the
+   2px ring are still the complete read — and they are never the ONLY carrier:
+   the glyph, the word, the header chip, the card edge and the trace bed all
+   change with them. */
+.looper-record.oj-btn.is-recording {
+    position: relative;
+    background: color-mix(in oklab, var(--accent-danger) 12%, var(--bg-tertiary));
+    color: var(--danger-ink);
+    box-shadow: inset 0 0 0 2px var(--accent-danger);
+}
+
+.looper-record.oj-btn.is-recording:hover {
+    background: color-mix(in oklab, var(--accent-danger) 22%, var(--bg-tertiary));
+}
+
+.looper-record.oj-btn.is-recording:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--accent-danger), var(--focus-ring);
+}
+
+/* The breath rides its OWN layer, and this is not decoration — it is the only
+   way the focus ring survives. A running animation sits ABOVE author-normal
+   declarations in the cascade, and `:focus-visible` is one, so while the
+   keyframes above animated the button's own `box-shadow` the ring was never
+   painted: the one state where a performer most needs to know where the
+   keyboard is was the one state that did not say. On a pseudo-element the two
+   never compete — the button keeps its `box-shadow` for the ring, the
+   `::after` keeps its own for the pulse. */
+.looper-record.oj-btn.is-recording::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    animation: looper-record-breathe 1200ms ease-in-out infinite;
+}
+
+@keyframes looper-record-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-danger) 22%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-danger) 22%, transparent); }
+}
+
+/* `global.css` collapses every animation for reduced motion — for `*`, `*::before`
+   AND `*::after`, so it still reaches the breath after the move — which leaves the
+   wash plus the static 2px ring: the complete state, just not breathing. */
+
+.looper-record__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.looper-silence[aria-pressed='true'] {
+    color: var(--danger-ink);
+}
+
+/* The whole card while a pass is capturing: one danger hairline, no glow. The
+   canvas's loud object is the cable, never the node. */
+.oj-node.looper-node.is-recording {
+    border-color: var(--accent-danger);
+}
+
+/* ---- The in-card confirms (UI-021) ------------------------------------- */
+
+.looper-confirm .looper-confirm__actions {
+    display: flex;
+    gap: var(--space-xs);
+    justify-content: flex-end;
+    margin-top: var(--space-xs);
+}
+
+/* ---- Layers ------------------------------------------------------------ */
+
+.looper-layers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.looper-layers__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+.looper-layers__count {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.looper-undo.oj-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px var(--space-xs);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.looper-list {
+    max-height: 116px;
+    gap: 3px;
+    padding-right: 2px;
+}
+
+.looper-layer.oj-list-row {
+    gap: var(--space-xs);
+    padding: 3px var(--space-xs);
+    cursor: grab;
+}
+
+.looper-layer.oj-list-row:active {
+    cursor: grabbing;
+}
+
+/* The row body is one line: name, trace, exact length. */
+.looper-layer .oj-list-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.looper-layer__name {
+    flex: 0 0 auto;
+    max-width: 74px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.looper-layer__name .oj-editable-label__text {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.looper-layer__wave {
+    flex: 1 1 auto;
+    min-width: 24px;
+}
+
+/* The exact length, hung right so lengths line up down the stack, with a little
+   air before the row's buttons — at 252px the digits and the mute glyph were
+   touching. */
+.looper-layer__len {
+    flex: 0 0 auto;
+    min-width: 26px;
+    padding-right: 3px;
+    text-align: right;
+    color: var(--text-muted);
+}
+
+/* Muted: the layer is still there, still in order, still draggable — it just
+   is not being heard. Dimmed and de-tinted, never removed. */
+.looper-layer.is-muted .oj-waveform__trace {
+    stroke: var(--text-muted);
+}
+
+.looper-layer.is-muted .looper-layer__name,
+.looper-layer.is-muted .looper-layer__len {
+    color: var(--text-muted);
+}
+
+.looper-layer.is-muted .looper-layer__wave {
+    opacity: 0.55;
+}
+
+.looper-layer__mute[aria-pressed='true'] {
+    color: var(--danger-ink);
+}
+
+.looper-layer__export.is-exported {
+    color: var(--success-ink);
+}
+
+.looper-layer__delete:hover {
+    color: var(--danger-ink);
+}
+
+/* A row that has been asked to confirm keeps its place in the stack and shows
+   the question where the buttons were — nothing moves, nothing overlays. */
+.looper-layer.is-confirming {
+    box-shadow: inset 0 0 0 1px var(--accent-danger);
+    cursor: default;
+}
+
+.looper-layer__confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.looper-layer__confirm .oj-btn {
+    padding: 1px 6px;
+    font-size: var(--text-sm);
+}
+
+/* ---- Mix --------------------------------------------------------------- */
+
+.looper-mix {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.looper-mix__hint,
+.looper-empty {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.looper-empty {
+    text-align: center;
+}

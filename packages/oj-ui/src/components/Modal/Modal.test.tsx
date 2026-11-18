@@ -36,6 +36,8 @@ describe('Modal', () => {
         );
         const panel = dialog()!;
         expect(panel.className).toContain('oj-modal--size-md');
+        expect(panel.className).toContain('oj-surface--elevation-overlay');
+        expect(panel.className).toContain('oj-surface--radius-xl');
         const scrim = panel.parentElement!;
         expect(scrim.className).toContain('oj-modal__scrim--align-center');
     });

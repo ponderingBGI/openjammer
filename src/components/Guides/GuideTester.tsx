@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import { Button, Callout, Spinner } from '@openjammer/oj-ui';
 import './Guide.css';
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'failure' | 'warning';
@@ -76,7 +76,7 @@ export function GuideTester({
         >
           {status === 'testing' ? (
             <>
-              <SpinnerIcon />
+              <Spinner size={14} />
               Testing...
             </>
           ) : (
@@ -88,12 +88,16 @@ export function GuideTester({
         </Button>
       ) : (
         <>
-          <div className={`guide-test-result ${status}`}>
-            {status === 'success' && <CheckIcon />}
-            {status === 'failure' && <XIcon />}
-            {status === 'warning' && <WarningIcon />}
-            <span>{message || getDefaultMessage(status)}</span>
-          </div>
+          <Callout
+            className="guide-test-result"
+            variant={status === 'success' ? 'success' : status === 'warning' ? 'warning' : 'danger'}
+            icon={
+              status === 'success' ? <CheckIcon /> : status === 'warning' ? <WarningIcon /> : <XIcon />
+            }
+            role="status"
+          >
+            {message || getDefaultMessage(status)}
+          </Callout>
           <Button
             variant="secondary"
             onClick={handleRetry}
@@ -126,14 +130,6 @@ function PlayIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor">
       <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="guide-spinner">
-      <path d="M21 12a9 9 0 11-6.219-8.56" />
     </svg>
   );
 }

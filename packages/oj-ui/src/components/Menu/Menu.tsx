@@ -83,7 +83,7 @@ export function Menu({ ariaLabel, onEscape, className, children, onKeyDown, ...r
 
     return (
         <Surface
-            elevation="menu"
+            elevation="overlay"
             radius="md"
             className={classes}
             role="menu"
@@ -97,7 +97,7 @@ export function Menu({ ariaLabel, onEscape, className, children, onKeyDown, ...r
 }
 
 export interface MenuItemProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onSelect'> {
-    /** The row's primary content — the Caveat-voiced action label. */
+    /** The row's primary 14px/500 Outfit action label. */
     label: ReactNode;
     /** Optional shortcut hint, rendered as a `Kbd` keycap (Mono-Means-Exact). */
     shortcut?: string;
@@ -105,6 +105,8 @@ export interface MenuItemProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onS
     leadingIcon?: ReactNode;
     /** Dimmed and non-actionable (`aria-disabled`); skipped by arrow nav. */
     disabled?: boolean;
+    /** Destructive action styling. The label uses the contrast-safe danger ink. */
+    danger?: boolean;
     /**
      * A nested `Menu` (or items) revealed on hover/focus. When present the row
      * shows a trailing chevron and never fires `onSelect` itself.
@@ -125,6 +127,7 @@ export function MenuItem({
     shortcut,
     leadingIcon,
     disabled = false,
+    danger = false,
     submenu,
     onSelect,
     className,
@@ -142,6 +145,7 @@ export function MenuItem({
     const classes = [
         'oj-menu-item',
         hasSubmenu && 'oj-menu-item--has-submenu',
+        danger && 'oj-menu-item--danger',
         className,
     ]
         .filter(Boolean)

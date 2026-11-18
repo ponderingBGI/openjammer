@@ -1,116 +1,186 @@
 /*
- * Port — DESIGN.md §5. 16px circle, 2px ink border, filled by wiring color;
- * hover scales 1.25x; connected brightens with an 8px colored glow (the one
- * place a soft glow is allowed — it signals a live connection, which is meaning).
+ * Port — the recessed socket well (New DNA, master-plan D7).
+ *
+ * A port is a HOLE, not a lamp. The well is an 18px circle sunk into the node
+ * body: inset fill, a `--border-control` ring (the one token that clears the
+ * 3:1 WCAG 1.4.11 boundary floor with no fill delta to lean on), and the shared
+ * `--shadow-inset` depth. A core dot sits in the middle: `--text-muted` when
+ * nothing is plugged in (4.5:1 on the inset — an empty socket has to read at a
+ * glance mid-set), the wiring color once a cable lands.
+ *
+ * Two rules this file exists to keep:
+ *   1. NO GLOW. Ever. "Sound is visible" allows exactly two glowing things —
+ *      a cable carrying signal and a meter. A port is neither.
+ *   2. NO SCALE on hover. A connection target that grows under the pointer moves
+ *      the thing you are aiming at (No-Surprise). Hover recolors the ring instead.
+ *
+ * The core dot is a fixed 8px target inside every shared 18px well. Schematic
+ * faceplates normalize their wells to that shared size in `_sockets.css`.
  */
 .oj-port {
-    display: inline-block;
+    /* The TARGET, which is bigger than the drawing. See the pad rule below. */
+    --oj-port-hit: 24px;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    flex-shrink: 0;
     width: var(--port-size);
     height: var(--port-size);
     border-radius: 50%;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    background: var(--bg-canvas);
-    cursor: crosshair;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast),
-        background var(--transition-fast);
-}
-
-.oj-port:hover {
-    transform: scale(1.25);
     background: var(--bg-tertiary);
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-inset);
+    cursor: crosshair;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
-.oj-port--audio-input {
-    background: var(--audio-input);
+/*
+ * The invisible hit pad (HA-19).
+ *
+ * The well is drawn at 18px because that is the size a socket should READ at,
+ * sunk into a node body. It is not the size a socket should be AIMED at: the
+ * measured canvas ports were 15-17px, on the most-repeated gesture in the whole
+ * app, on a trackpad, in a dark room, mid-set. A concentric >=24px circle
+ * carries the pointer without moving a single pixel of the drawing — the same
+ * reason hover recolours the ring instead of scaling the well.
+ *
+ * It is a pseudo-element, so it costs no DOM and cannot be dropped by a consumer
+ * that spreads its own children into the socket.
+ */
+.oj-port::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(var(--oj-port-hit), 100%);
+    height: max(var(--oj-port-hit), 100%);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
 }
 
-.oj-port--audio-output {
-    background: var(--audio-output);
+/*
+ * Two places where the drawn size IS the target, and a pad would steal a gesture
+ * that matters more than the cable:
+ *   - `KeyTile` — the TILE is the playable surface and the socket sits on it. A
+ *     24px pad over a 12px well on a 34px key eats the note.
+ *   - the MiniLab device panel — a dense hardware map whose control sockets sit
+ *     directly under their knob/fader. A pad there reaches the dial.
+ * Both class names are declared by the components that own them, so this is a
+ * stated contract rather than a guess about someone's markup.
+ */
+.oj-port.oj-key-tile__port,
+.oj-port.minilab3-control-port {
+    --oj-port-hit: 0px;
 }
 
-.oj-port--control-input {
-    background: var(--control-input);
+/* The core — what the socket is carrying. Exactly 8px in every shared well. */
+.oj-port::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: background var(--motion-fast);
 }
 
-.oj-port--control-output {
-    background: var(--control-output);
+/* Hover — a 1px accent ring on the well. The target does not move. */
+.oj-port:hover {
+    border-color: var(--accent-primary);
 }
 
-.oj-port--audio-input.is-connected,
-.oj-port--audio-output.is-connected {
-    background: var(--audio-connected);
-    box-shadow: 0 0 8px var(--audio-connected);
+/* One focus ring, everywhere. */
+.oj-port:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-inset), var(--focus-ring);
 }
 
-.oj-port--control-input.is-connected,
-.oj-port--control-output.is-connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 8px var(--control-connected);
+/*
+ * The wiring colors — the legend, at two strengths.
+ *
+ * The rule here USED to be: an idle socket of any type reads the same, because
+ * what it is carrying right now is nothing. That argument is not being deleted
+ * silently, it is being answered (HA-12). It confuses the SIGNAL with the
+ * SOCKET. What a port may carry is a property of the socket — it is stamped on
+ * the connector of every piece of hardware this instrument is pretending to be
+ * — and it is exactly the thing a player needs to know while deciding where to
+ * drag, which is *before* any cable exists. Measured, the old rule meant both an
+ * audio and a control well painted the identical grey core, so the legend
+ * PRODUCT.md says is learned in seconds was absent at the only moment it was
+ * needed.
+ *
+ * So the type reads at rest, at reduced chroma (mixed toward the muted ink), and
+ * at full strength once a cable lands. Idle is a tint, live is the color: the
+ * eye still reads "this one is carrying something" first, and "this one takes
+ * sound" second — which is the right order. Still no glow, still no scale.
+ */
+.oj-port--control::after {
+    background: color-mix(in srgb, var(--control-connection) 45%, var(--text-muted));
 }
 
-/* Universal — adapts to whatever it connects to. Until typed it shows the
-   rainbow-until-typed gradient (DESIGN.md §2 Wiring — the one sanctioned
-   multi-hue treatment, signalling "any type"); once resolved, the consumer
-   passes `resolvedKind` and the port renders that wiring color instead. */
-.oj-port--universal {
-    background: linear-gradient(135deg, #ff6b6b, #ffe66d, #4ecb71, #4db8ff, #9b59b6);
-    background-size: 200% 200%;
-    animation: oj-port-rainbow 3s ease infinite;
+.oj-port--audio::after {
+    background: color-mix(in srgb, var(--audio-connection) 45%, var(--text-muted));
 }
 
-.oj-port--universal.is-connected {
-    /* Connected-but-still-universal: hold the rainbow steady (no resolved type). */
-    animation: none;
+.oj-port--universal::after {
+    background: color-mix(in srgb, var(--universal-connection) 45%, var(--text-muted));
 }
 
-@keyframes oj-port-rainbow {
-    0% {
-        background-position: 0% 50%;
-    }
-    50% {
-        background-position: 100% 50%;
-    }
-    100% {
-        background-position: 0% 50%;
-    }
+.oj-port--control.is-connected::after {
+    background: var(--control-connection);
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .oj-port--universal {
-        animation: none;
-    }
+.oj-port--audio.is-connected::after {
+    background: var(--audio-connection);
 }
 
-/* A faint dashed slot inviting a new connection (e.g. a node's "+ port"). */
+.oj-port--universal.is-connected::after {
+    background: var(--universal-connection);
+}
+
+/* A placeholder slot ("add a port") — the well is drawn, dashed, with nothing
+   in it. An empty outline reads as an invitation; a dimmed dot would read as a
+   broken connection. */
 .oj-port.is-placeholder {
-    opacity: 0.4;
     border-style: dashed;
+    box-shadow: none;
+    background: transparent;
     cursor: copy;
 }
 
-/* Active — a control port firing right now (e.g. a held control key on a
-   keyboard). Success-green fill + the one sanctioned live glow + a brief pulse;
-   a performance signal you read mid-set (DESIGN.md §5). Stilled for reduced motion. */
-.oj-port.is-active {
-    background: var(--accent-success);
-    box-shadow: 0 0 10px var(--accent-success);
-    animation: oj-port-active-pulse 0.3s ease-in-out;
+.oj-port.is-placeholder::after {
+    display: none;
 }
 
-@keyframes oj-port-active-pulse {
-    0% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.2);
-    }
-    100% {
-        transform: scale(1);
-    }
+/* Active — a control port firing right now (a held control key). The core goes
+   success-ink; no pulse, no glow. The performer reads the core, not a halo. */
+.oj-port.is-active::after {
+    background: var(--success-ink);
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .oj-port.is-active {
-        animation: none;
-    }
+/*
+ * ARMED — this socket is holding the loose end of a cable (U8's keyboard route:
+ * Enter arms, Enter on a compatible socket lands, Escape drops it).
+ *
+ * Driven by a `data-armed` attribute the canvas writes straight to the DOM,
+ * because the canvas — not the node — owns the connection gesture and the same
+ * rule then covers every faceplate without threading a prop through fourteen of
+ * them.
+ *
+ * It deliberately does NOT wear the focus ring. It did, and that put the ring on
+ * two things at once: after arming and one `Tab`, the armed socket and the newly
+ * focused control both had it, so the one mark a keyboard player is taught to
+ * read meant "you are here" OR "you are holding a cable". PRODUCT.md's
+ * accessibility line is explicit that there is exactly one focus ring. The
+ * accent border and the accent core are already distinct from every other port
+ * state and are sufficient on their own; the ring goes back to meaning only
+ * "you are here". No glow, no scale, no pulse.
+ */
+.oj-port[data-armed] {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-inset);
+}
+
+.oj-port[data-armed]::after {
+    background: var(--accent-primary);
 }

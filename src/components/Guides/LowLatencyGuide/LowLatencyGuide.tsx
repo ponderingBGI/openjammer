@@ -46,12 +46,14 @@ export function LowLatencyGuide() {
   // Initialize on mount - auto-detect platform and devices
   useEffect(() => {
     if (!guide.isOpen) return;
+    let cancelled = false;
 
     const initialize = async () => {
       setIsInitializing(true);
 
       // Detect platform
       const detectedPlatform = detectPlatform();
+      if (cancelled) return;
       setPlatform(detectedPlatform);
 
       // Auto-complete platform step
@@ -63,6 +65,7 @@ export function LowLatencyGuide() {
       // Try to get devices (may need permission)
       try {
         const devices = await getExternalAudioDevices();
+        if (cancelled) return;
         setExternalDevices(devices);
 
         if (devices.length > 0) {
@@ -76,15 +79,17 @@ export function LowLatencyGuide() {
       // Get latency info
       try {
         const latency = getLatencyInfo();
+        if (cancelled) return;
         setLatencyInfo(latency);
       } catch {
         // Will handle in latency check step
       }
 
-      setIsInitializing(false);
+      if (!cancelled) setIsInitializing(false);
     };
 
     initialize();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs only when the panel opens; `guide` is a fresh object each render, so depending on it would re-run device enumeration / mic-permission requests on every store change
   }, [guide.isOpen]);
 
@@ -385,10 +390,10 @@ export function LowLatencyGuide() {
               <strong>Always use ASIO</strong> when available.
             </GuideInfoBox>
 
-            <h5 style={{ margin: '16px 0 8px', color: 'var(--text-primary)' }}>
+            <h5 className="guide-substep-title">
               For Focusrite Scarlett:
             </h5>
-            <ol style={{ fontSize: '14px', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+            <ol className="guide-substep-list">
               <li>Download <a href="https://downloads.focusrite.com/" target="_blank" rel="noopener noreferrer" className="guide-external-link">Focusrite Control 2 <ExternalLinkIcon /></a></li>
               <li>Run the installer as Administrator</li>
               <li>Restart your computer when prompted</li>
@@ -436,10 +441,10 @@ export function LowLatencyGuide() {
               Kext" for ~1ms improvement.
             </p>
 
-            <h5 style={{ margin: '16px 0 8px', color: 'var(--text-primary)' }}>
+            <h5 className="guide-substep-title">
               Optional for Focusrite:
             </h5>
-            <ul style={{ fontSize: '14px', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+            <ul className="guide-substep-list">
               <li>Download <a href="https://downloads.focusrite.com/" target="_blank" rel="noopener noreferrer" className="guide-external-link">Focusrite Control 2 <ExternalLinkIcon /></a></li>
               <li>Install the optional "Low Latency Kext" for ~1ms improvement</li>
             </ul>
@@ -488,7 +493,7 @@ export function LowLatencyGuide() {
               Let's measure your current audio latency. For real-time music
               making, you want:
             </p>
-            <ul style={{ fontSize: '14px', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+            <ul className="guide-substep-list">
               <li><strong>&lt; 10ms</strong> - Excellent (imperceptible)</li>
               <li><strong>10-20ms</strong> - Good (acceptable)</li>
               <li><strong>&gt; 20ms</strong> - High (noticeable delay)</li>
@@ -511,10 +516,10 @@ export function LowLatencyGuide() {
           >
             {isWindows ? (
               <>
-                <h5 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>
+                <h5 className="guide-substep-title guide-substep-title--tight">
                   Windows Optimization:
                 </h5>
-                <ol style={{ fontSize: '14px', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+                <ol className="guide-substep-list">
                   <li>Set Power Plan to "High Performance"</li>
                   <li>Disable USB selective suspend in Power Options</li>
                   <li>Close unnecessary background applications</li>
@@ -529,10 +534,10 @@ export function LowLatencyGuide() {
               </>
             ) : isMac ? (
               <>
-                <h5 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>
+                <h5 className="guide-substep-title guide-substep-title--tight">
                   macOS Optimization:
                 </h5>
-                <ol style={{ fontSize: '14px', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+                <ol className="guide-substep-list">
                   <li>Disable Time Machine during sessions</li>
                   <li>Turn off Bluetooth if not needed</li>
                   <li>Close unnecessary background applications</li>
@@ -645,8 +650,12 @@ function GuideSection({ title, count, defaultCollapsed, children }: GuideSection
 
   return (
     <div className="guide-section">
-      <div
+      {/* A real button: the section header is an operable control, so it must be
+          reachable by Tab and answer to Enter/Space like every other disclosure. */}
+      <button
+        type="button"
         className="guide-section-header"
+        aria-expanded={!isCollapsed}
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
         <h3 className="guide-section-title">{title}</h3>
@@ -654,7 +663,7 @@ function GuideSection({ title, count, defaultCollapsed, children }: GuideSection
         <div className={`guide-section-toggle ${isCollapsed ? 'collapsed' : ''}`}>
           <ChevronDownIcon />
         </div>
-      </div>
+      </button>
       {!isCollapsed && <div className="guide-section-content">{children}</div>}
     </div>
   );
@@ -679,4 +688,3 @@ function ExternalLinkIcon() {
   );
 }
 
-export default LowLatencyGuide;

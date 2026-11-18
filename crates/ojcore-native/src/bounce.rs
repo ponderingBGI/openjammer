@@ -7,7 +7,7 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
@@ -575,14 +575,29 @@ impl Dither {
     }
 }
 
+/// fsync the directory holding `path`, so a rename/create is durable across a
+/// power loss.
+///
+/// Split by platform rather than `#[cfg]`-ing statements inside one body: Windows
+/// has no directory handle to `sync_all`, so on Windows every local here is
+/// genuinely unused, and `-D warnings` turned that into a build FAILURE on a
+/// Windows contributor's box while Linux CI stayed green.
+#[cfg(not(windows))]
 fn sync_parent(path: &Path) -> Result<(), BounceError> {
+    use std::path::PathBuf;
     let parent: PathBuf = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    #[cfg(not(windows))]
     File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+/// Windows: a directory cannot be opened as a file to be fsynced, so the file's
+/// own `sync_all` (already done by the caller) is the whole durability story.
+#[cfg(windows)]
+fn sync_parent(_path: &Path) -> Result<(), BounceError> {
     Ok(())
 }
 
@@ -595,6 +610,7 @@ mod tests {
         sched_event_kind, ConnectionType, IrEdge, IrNode, MeterPoint, NodeIdx, Param,
         PrimitiveKind, SchedEvent, TempoPoint,
     };
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn temp_file(extension: &str) -> PathBuf {

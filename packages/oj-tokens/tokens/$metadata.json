@@ -1,8 +1,7 @@
 {
   "tokenSetOrder": [
     "primitive",
-    "themes/cream",
-    "themes/cyberpunk",
-    "themes/midnight"
+    "themes/light",
+    "themes/dark"
   ]
 }

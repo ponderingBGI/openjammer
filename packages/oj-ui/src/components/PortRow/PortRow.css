@@ -1,14 +1,20 @@
 /*
- * PortRow — DESIGN.md §5. A port dot beside its name inside a node body.
- * `input` reads [dot][label] left-aligned; `output` reverses to [label][dot]
- * right-aligned so the dot always hugs the node edge it wires to. Caveat label,
- * --space-xs gap. Styled only via semantic tokens (no literal colors), so it
- * follows the active theme.
+ * PortRow — a socket and its name, the atom the node body is built from.
+ *
+ * Inputs read [socket][label] left-to-right; outputs read [label][socket]
+ * right-aligned, so on a card whose ports are one space-between row the two
+ * groups mirror each other and every socket sits on the side its cable comes
+ * from. The label is the New DNA micro-voice: 9.5px mono, uppercase, tracked —
+ * exact, small, and never competing with the node's own controls.
+ *
+ * `min-height` is not decoration: the socket is 18px but the row a finger or a
+ * mouse has to hit is 24px, the smallest target a performer can trust.
  */
 .oj-port-row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 7px;
+    min-height: 24px;
 }
 
 .oj-port-row--input {
@@ -23,15 +29,20 @@
     text-align: right;
 }
 
-/* Caveat voice — the friendly label naming what the dot wires. */
 .oj-port-row__label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
     line-height: 1.2;
+    white-space: nowrap;
+    transition: color var(--motion-fast);
 }
 
-/* Visually hidden but kept in the DOM for assistive tech. */
+/* Visually hidden but kept in the DOM for assistive tech. The SOCKET stays —
+   a row without a name still has to be connectable. */
 .oj-port-row__label--hidden {
     position: absolute;
     width: 1px;
@@ -44,15 +55,9 @@
     border: 0;
 }
 
-/* A live connection nudges the label to the primary ink — a quiet confirm
-   that pairs with the Port's brighten/glow rather than standing alone. */
+/* Wired up — the name steps forward with the signal. */
 .oj-port-row.is-connected .oj-port-row__label {
-    color: var(--text-primary);
-}
-
-/* A placeholder row reads as a faint invitation, matching its dashed dot. */
-.oj-port-row.is-placeholder .oj-port-row__label {
-    color: var(--text-muted);
+    color: var(--text-secondary);
 }
 
 /* A GATED row (declared but not engine-wired yet) reads as visibly inert: dimmed,
@@ -62,11 +67,6 @@
    `pointer-events: none` here would have killed the hover the `title` (the why)
    needs, so the explanation could never show. cursor:not-allowed signals it. */
 .oj-port-row.is-disabled {
-    opacity: 0.4;
+    opacity: 0.45;
     cursor: not-allowed;
-}
-
-.oj-port-row.is-disabled .oj-port-row__label {
-    color: var(--text-muted);
-    font-style: italic;
 }

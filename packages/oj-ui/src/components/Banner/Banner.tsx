@@ -6,10 +6,8 @@ export type BannerTone = 'warning' | 'danger' | 'info';
 
 export interface BannerProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
     /**
-     * The signal this banner carries. The accent shows ONLY on the thick left
-     * edge and the icon (Signal-Not-Brand) — never on the surface or title:
-     * `warning` → --accent-warning, `danger` → --accent-danger,
-     * `info` → --audio-connection. All read theme tokens, never literals.
+     * The signal this banner carries. Tone tints the title and optional icon;
+     * the surface and message stay neutral.
      */
     tone: BannerTone;
     /**
@@ -17,9 +15,9 @@ export interface BannerProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title
      * always carries a label or icon, never color alone (Signal-Not-Brand).
      */
     icon?: ReactNode;
-    /** The headline, set in the Caveat voice and neutral ink (Caveat-Is-the-Voice). */
+    /** The 14px/600 Outfit headline, tinted by the tone. */
     title: ReactNode;
-    /** A quieter line under the title, set in Inter for dense reading. */
+    /** A quieter 13px Outfit line under the title. */
     message?: ReactNode;
     /**
      * Right-aligned slot for the response Buttons (Fix Now / Ask AI / Dismiss).
@@ -29,14 +27,8 @@ export interface BannerProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title
 }
 
 /**
- * A full-width notice banner. Composes {@link Surface} (node fill, 2px ink
- * sketch border, hard blur-free menu shadow) with a tone accent confined to the
- * thick left edge and the icon, so the strip reads as a labelled signal rather
- * than a brand-colored panel (DESIGN.md Signal-Not-Brand, Hard-Shadow). The
- * title stays neutral ink; the `actions` slot holds Buttons. Props in, callbacks
- * out — no app state. Theme-agnostic: styled entirely via semantic CSS
- * variables, so it follows the active theme. Replaces the LatencyWarningBanner
- * surface (a full rewrite off its clay fill).
+ * A full-width raised notice surface. State is expressed by the title/icon,
+ * never a stripe or tinted card. The `actions` slot composes committed Buttons.
  */
 export function Banner({
     tone,
@@ -53,7 +45,7 @@ export function Banner({
 
     return (
         <Surface
-            elevation="menu"
+            elevation="raised"
             radius="lg"
             className={classes}
             role="status"

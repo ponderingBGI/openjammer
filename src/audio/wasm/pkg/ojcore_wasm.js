@@ -1,3 +1,5 @@
+/* @ts-self-types="./ojcore_wasm.d.ts" */
+
 /**
  * Configured render quantum (frames per [`process`] call / `output` length).
  * @returns {number}
@@ -33,7 +35,7 @@ export function cmd_ring_ptr() {
  * ingests both tiers identically.
  *
  * The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
- * surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+ * surfaces faults straight from `ojcore::NodeBudget` (the `no_std` NaN/garbage guard
  * `sanitize` sets `non_finite` from the render path) — exactly how
  * [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
  * surfaces once per drain window; a persistently-bad node re-raises next block
@@ -107,9 +109,38 @@ export function drain_meters() {
 }
 
 /**
+ * Drain the engine's authoritative transport snapshot as the JSON
+ * [`ojproto::EngineFrame::Transport`] — **the same frame** the native tier
+ * pushes onto its `std`-only meter ring, produced by the **same** single
+ * assembler (`ojcore::Engine::transport_frame`). Two encodings of one contract,
+ * not a second transport protocol: native encodes it into
+ * `meter::return_frame::encode_transport`, the worklet ships this JSON straight
+ * through the `transport` postMessage the executor already parses.
+ *
+ * **This is the browser tier's only way to ACKNOWLEDGE a transport command.**
+ * Without it `arrangementStore`'s 1500 ms `armPendingTransportTimeout` fires on
+ * every Play and the player is told "the audio engine did not acknowledge the
+ * transport command" — while the engine was in fact rolling perfectly. It is
+ * therefore UNGATED by metering (a meter toggle must never be able to silence
+ * the transport), exactly like the looper return path.
+ *
+ * The wasm tier has no return-frame ring (those are `std`-only), so this reads
+ * the engine directly — exactly how [`drain_meters`] reads `meters_mut`. Called
+ * by the worklet every 4 render quanta — every ~10 ms, i.e. **~94x/s** at
+ * 48 kHz / 128 — not per block.
+ * @returns {Uint8Array}
+ */
+export function drain_transport() {
+    const ret = wasm.drain_transport();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
  * Encode an [`RtCommand`] as the JSON frame the command ring expects. Helper
  * for tests / a JS-side mirror; not on the render path. Returns the bytes a
- * producer would `push` into the [`cmd_ring`](Host::cmd_ring).
+ * producer would `push` into the host's command ring.
  * @param {number} node
  * @param {number} param
  * @param {number} value
@@ -210,6 +241,30 @@ export function load_graph(bytes) {
     const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.load_graph(ptr0, len0);
+    return ret !== 0;
+}
+
+/**
+ * Install a serialized [`TempoMap`] beside [`load_graph`].
+ * @param {Uint8Array} bytes
+ * @returns {boolean}
+ */
+export function load_tempo_map(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.load_tempo_map(ptr0, len0);
+    return ret !== 0;
+}
+
+/**
+ * Install a serialized authored [`Timeline`] beside [`load_graph`].
+ * @param {Uint8Array} bytes
+ * @returns {boolean}
+ */
+export function load_timeline(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.load_timeline(ptr0, len0);
     return ret !== 0;
 }
 

@@ -33,6 +33,7 @@ needed or possible. *Optional hygiene:* trim the three currently-unused allow en
 | **Steinberg VST2 SDK** | VST2 hosting | Proprietary (not freely redistributable) | **OWNER-GATED.** Do **not** enable VST2 in the public installer without the Steinberg VST2 agreement (already reflected by the owner-provisioned VST2 note in `src-tauri`). |
 | **libfaust / GRAME runtime** | Faust compilation (`ojfaust`, opt-in `libfaust` feature) + emitted Faust code | Confirm (GRAME) | Audit the libfaust + Faust standard-library + emitted-code licensing before shipping the live Faust path. |
 | **Bundled `.sf2` soundfont(s)** | Sample data played by `rustysynth` (which is MIT) | Per-asset — **audit the specific file** | Many GM soundfonts are permissive/CC0; some are not. The soundfont **data** has its own license independent of `rustysynth`. Confirm before bundling. |
+| **Outfit** | Self-hosted UI font, copyright The Outfit Project Authors | **SIL Open Font License 1.1 (OFL-1.1)** | One latin-subset variable WOFF2 (wght 400–700) is bundled for offline use. |
 
 > **The default public installer** (`build-installers.yml` → `bun run tauri build`, default features) ships
 > the AGPL-JUCE host. Ensure the AGPL text + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) + this notice

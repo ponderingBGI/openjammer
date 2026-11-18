@@ -1,0 +1,729 @@
+/* LibraryNode — a file browser that lives on the canvas.
+ *
+ * 885 lines of hand-rolled browser chrome became this. Every row, pill, field
+ * and list here is an oj-ui part (`List`/`ListRow`/`Input`/`Chip`/`Button`/
+ * `WaveformView`/`ProgressBar`); what is left is the two-panel geometry, the
+ * drag-and-drop states that geometry needs, and one thing only this card has:
+ * a per-tag identity hue.
+ *
+ * **The tag hue rule.** `--tag-color` arrives inline (the store hashes a tag
+ * name to a hue) and is spent on ONE thing: an 8px dot. It is never a ground
+ * under a word. W5-P7 also washed the chips with it and four of four seeded tags
+ * fell to 3.46-4.33:1 in dark — the hue comes from arbitrary user text, so no
+ * mix percentage can be proven AA for every possible tag name. Every WORD on
+ * this card is a theme token, so a tag can be any colour in the wheel and still
+ * clear AA in both themes.
+ *
+ * Rebuilt in W5-P7; the chip grounds were removed in W5-P7b. */
+
+/* The one resizable node on this canvas. The explicit width/height come from
+   `data.width` / `data.height` via `useResize` (S3's measured geometry reads
+   the same two fields), so the card must lay its body out to FILL them. */
+.oj-node.library-node {
+    min-width: 400px;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.oj-node.library-node .oj-node__content {
+    flex: 1;
+    min-height: 0;
+    gap: var(--space-sm);
+}
+
+.oj-node.library-node.is-resizing {
+    /* No transition while the pointer is driving the size — a 120ms ease on a
+       drag reads as lag, and lag on a resize reads as a broken app. */
+    transition: none;
+}
+
+.library-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    flex: 1;
+    min-height: 0;
+}
+
+/* ---- The two panels ---------------------------------------------------- */
+
+.library-panels {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: var(--space-sm);
+}
+
+.library-tags-panel {
+    display: flex;
+    flex-direction: column;
+    width: 34%;
+    min-width: 118px;
+    max-width: 220px;
+    min-height: 0;
+    padding: var(--space-xs);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-inset);
+}
+
+.library-files-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    gap: var(--space-sm);
+}
+
+/* A tag section (Pinned / All tags) is a drop zone as well as a list: dropping
+   a tag INTO it pins or unpins it, so it has to be able to say "yes, here". */
+.library-tags-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.library-tags-section.is-drop-target {
+    background: color-mix(in oklab, var(--accent-primary) 10%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.library-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-xs);
+    padding: 2px var(--space-xs) 4px;
+}
+
+.library-section-head__title {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.library-add-tag.oj-btn {
+    padding: 1px 6px;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.library-tags-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.library-tag-list {
+    gap: 2px;
+    overflow: visible;
+}
+
+.library-separator {
+    flex: 0 0 auto;
+}
+
+/* ---- One tag ----------------------------------------------------------- */
+
+.library-tag.oj-list-row {
+    position: relative;
+    gap: 6px;
+    padding: 3px var(--space-xs);
+    font-size: var(--text-sm);
+}
+
+/* The local `.library-tag .oj-list-row__body` restatement is GONE (06fa8c7). It
+   existed because `ListRow`'s body span declared only `flex: 1; min-width: 0`,
+   so an inline box swallowed the 8px dot below and killed the name's ellipsis.
+   `ListRow.css` now ships `display: flex; align-items: center;
+   gap: var(--space-xs); flex: 1; min-width: 0` on `.oj-list-row__body` itself,
+   which is this rule verbatim except for the gap — 4px (`--space-xs`) where the
+   copy said 6px. The token wins: a tag row's dot-to-name gap is the same
+   in-row gap every other list row in the app spends, and one consumer holding a
+   private 6px is exactly the drift the component landing was meant to end.
+   (The file-row rule below is NOT redundant — it overrides `flex` and the
+   120px filename floor — so it stays.) */
+
+/* The hue, spent on eight pixels. */
+.library-tag__dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: var(--tag-color);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 14%, transparent);
+}
+
+.library-tag__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Filtering by this tag — the row takes the tag's own wash, so which filter is
+   on is legible without reading.
+
+   This is the ONE place a `--tag-color` wash sits under text, and it is bounded
+   — provably, for every tag name anyone will ever type. Two facts make it so,
+   and it is worth naming which one is load-bearing. `getTagColor` hashes the
+   tag's text into a HUE only — saturation is pinned at 60% and lightness at 70%
+   — so the composite ground can only travel a narrow band. And the text is
+   `--text-primary`. Swept over all 360 hues, worst case is 11.43:1 in light
+   (hue 240) and 6.69:1 in dark (hue 60). The same 24% wash under
+   `--text-secondary` would be 3.23:1 in dark — a fail. The number that makes
+   this safe is the TOKEN, not the percentage. */
+.library-tag.oj-list-row.is-selected {
+    background: color-mix(in oklab, var(--tag-color) 24%, transparent);
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tag-color) 60%, transparent);
+}
+
+.library-tag.is-drop-target {
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.library-tag.is-dragging {
+    opacity: 0.45;
+}
+
+/* Where a dragged tag would land. */
+.library-tag.drop-before::before,
+.library-tag.drop-after::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--accent-primary);
+}
+
+.library-tag.drop-before::before { top: -2px; }
+.library-tag.drop-after::after { bottom: -2px; }
+
+.library-tag__action.oj-btn {
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    transition: opacity var(--motion-fast), color var(--motion-fast);
+}
+
+.library-tag:hover .library-tag__action.oj-btn,
+.library-tag__action.oj-btn:focus-visible {
+    opacity: 1;
+}
+
+.library-tag__action.oj-btn:hover {
+    color: var(--danger-ink);
+}
+
+/* ---- Search ------------------------------------------------------------ */
+
+.library-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.library-search__input.oj-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 0 var(--space-sm);
+    font-size: var(--text-sm);
+}
+
+/* The active filter chip. It carries NO tag-hue wash for the same reason the
+   file-row chips do not (see `.library-file-row__tag` below): `--tag-color` is a
+   hue hashed out of the tag's own text, so a wash under a fixed text token gives
+   a contrast ratio that changes with the tag's NAME. Identity rides on the dot;
+   the words keep the ground every other chip in the app sits on. */
+.library-filter-chip {
+    cursor: pointer;
+}
+
+.library-empty-trash.oj-btn {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    font-size: var(--text-sm);
+}
+
+/* ---- What the cable is carrying ---------------------------------------- */
+
+.library-feed {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-inset);
+}
+
+.library-feed__clip {
+    flex: 1;
+    min-width: 0;
+}
+
+.library-feed__label {
+    flex: 0 0 auto;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--audio-ink);
+}
+
+/* ---- The file list ----------------------------------------------------- */
+
+.library-files-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-inset);
+    overflow: hidden;
+}
+
+.library-files {
+    height: 100%;
+    padding: var(--space-xs);
+    overflow-y: auto;
+}
+
+.library-file-list {
+    gap: 2px;
+    overflow: visible;
+}
+
+.library-count {
+    display: block;
+    padding: 0 var(--space-xs) 4px;
+    color: var(--text-muted);
+}
+
+.library-file-row.oj-list-row {
+    gap: 6px;
+    padding: 3px var(--space-xs);
+    font-size: var(--text-sm);
+}
+
+/* The name owns the row; the tags yield. `ListRow` pins its actions slot with
+   `flex-shrink: 0`, which on a 3-tag row squeezed `pad-long-name-that-runs-on.wav`
+   down to 63px — about eight characters — while a 1-tag row above it carried a
+   large void. A file browser whose files cannot be told apart is not one, so the
+   body claims a 120px floor and the trailing cluster is the side that gives.
+   The flex line itself (`display`/`align-items`/`gap`) comes from `ListRow` now
+   and is not restated here — only the two declarations that OVERRIDE it. */
+.library-file-row .oj-list-row__body {
+    flex: 1 1 auto;
+    min-width: 120px;
+}
+
+/* The trailing cluster does NOT shrink, and that is the other half of the
+   duration column. W5-P7b let it shrink to buy the longest filename about 20px,
+   and a shrunk cluster gives its own row a wider body — so that row's duration
+   sat 20px right of its neighbours' (measured: 606.97 vs 587.02) and its trash
+   button was 2px narrower than theirs. The fixed-width tag column below buys
+   the name its room with a CONSTANT width instead, which is the version that
+   lets a column of lengths be read as a column. */
+.library-file-row .oj-list-row__actions {
+    flex-shrink: 0;
+}
+
+.library-file-row__name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Lengths are compared down the list, so they get a fixed box and hang right:
+   `0.4s` and `1s` line up on their last digit even though the names above them
+   do not. (`.oj-node__readout` already supplies `tabular-nums`.)
+
+   A fixed box is only half of it, and W5-P7b lost the other half without saying
+   so: the duration sits at the END of the body, so its x position is the body's
+   right edge — and the body's right edge is whatever the trailing cluster left
+   over. One row carrying a tag pair and the next carrying a bare `+2` put their
+   lengths at two different x's and made the whole right edge ragged. The tag
+   payload below is therefore a fixed-width column, which is what makes the
+   trailing cluster the same width on every row of a given view. */
+.library-file-row__len {
+    flex: 0 0 34px;
+    text-align: right;
+    color: var(--text-muted);
+}
+
+.library-file-row__rename.oj-input {
+    flex: 1;
+    min-width: 0;
+    height: 22px;
+    padding: 0 6px;
+    font-size: var(--text-sm);
+}
+
+/* A crop is a real, different object — it points at a parent file — so it says
+   so in the micro mono voice rather than with a glyph nobody can name. */
+.library-file-row__virtual {
+    flex: 0 0 auto;
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-muted);
+}
+
+/* Preview. A borderless glyph until touched — a browser row should be quiet. */
+.file-preview-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.file-preview-btn:hover:not(:disabled) {
+    background: var(--bg-node);
+    color: var(--text-primary);
+}
+
+.file-preview-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.file-preview-btn.is-playing {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+
+.file-preview-btn:disabled {
+    opacity: 0.45;
+    cursor: progress;
+}
+
+/* A file-row tag chip. It used to sit on a 22% wash of `--tag-color`, and that
+   is why four of four seeded tags measured 3.46–4.33:1 in dark against
+   `--text-secondary`. `--tag-color` is `getTagColor(tag)` — a hue hashed out of
+   arbitrary user text — so the ground under a FIXED text token is
+   unbounded: a different tag name gives a different, unpredictable ratio, and no
+   value of the mix percentage can make every hue provably AA. It broke this
+   file's own rule 3 ("a tag's colour is its identity, never its legibility").
+   The wash is gone. The chip now sits on `--bg-tertiary` like every other chip
+   in the app (4.57 light / 4.50 dark, guaranteed for any tag name), and the
+   tag's identity stays where it already measures 12.81 / 14.17 — the
+   `--tag-color` dot and the tag name in the left panel (`.library-tag__dot`).
+
+   The chip is the part that yields when a long filename needs the room (see
+   `.library-file-row .oj-list-row__body` above) — but it yields by ELLIPSIS, not
+   by collapsing: a chip squeezed to its padding is an empty pill, which says
+   less than no chip at all. Past one tag the row shows a `+N` count instead. */
+.library-file-row__tag.oj-chip {
+    cursor: pointer;
+    /* 76px holds a five-character tag whole at the Chip's own 12px/10px padding
+       ("drums", "pads", "warm"); anything longer ellipsises inside it. The 48px
+       floor is what stops it collapsing into an empty pill — it used to be 60,
+       and 60 is too high now that a `+N` shares the column with it: the pair is
+       the side that must yield, or the COUNT is what gets crushed (it rendered
+       as "+.." at 60). */
+    min-width: 48px;
+    max-width: 76px;
+    overflow: hidden;
+}
+
+.library-file-row__tag.oj-chip .oj-chip__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The tag payload as ONE fixed-width column, so every row's trailing cluster is
+   the same width and the durations line up (see `.library-file-row__len`).
+   92px is a whole 76px chip plus its remove button. */
+.library-file-row__tags {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    /* 104px is measured, not chosen: a tag pair is 74px (a 60px chip plus its
+       18px remove button, less the 4px they overlap by), the gap is 4, and the
+       tightened `+N` below is 26. A narrower column does not just crop — the
+       pair keeps its 60px chip and its remove button slides ON TOP of the `+N`,
+       which then cannot be clicked at all. */
+    flex: 0 0 104px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* The one row that is allowed to break the column: the `+N` disclosure is open,
+   so every tag on that file is on screen and removable. It wraps rather than
+   squeezing — a chip crushed to its padding is an empty pill. */
+.library-file-row.is-tags-expanded .library-file-row__tags {
+    flex: 0 1 auto;
+    /* Two pairs to a line, then WRAP and let the row grow taller. Without the
+       cap the open row simply took the width it wanted and ran past the panel's
+       edge, taking the collapse control with it — a disclosure you cannot
+       close. */
+    max-width: 208px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 3px;
+    overflow: visible;
+}
+
+/* `+N` is a disclosure, not a label: it opens the row's remaining tags so each
+   one can be taken off. It says so with a pointer and with `aria-expanded`. */
+.library-file-row__more.oj-chip {
+    cursor: pointer;
+    /* Never shrinks: a squeezed count is unreadable AND unclickable, and it is
+       the control that reaches the tags the row is not showing. The tag chip
+       beside it ellipsises instead. */
+    flex: 0 0 auto;
+    /* A count is two glyphs; the Chip's default side padding is sized for a
+       word. Tightening it is what buys the filename back the room the column
+       above costs it. */
+    padding-inline: 6px;
+    min-width: 0;
+}
+
+/* A tag and its remove button travel together, so the button is unmistakably
+   about THAT tag and the pair wraps/truncates as one object. */
+.library-file-row__tagpair {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+}
+
+/* Taking a tag off a file. It is a real, labelled control — not a double-click
+   — because a double-click has no keyboard route and no accessible name, and
+   this is the only way a tag comes off a file. It hides at rest so a quiet row
+   stays quiet, and appears on hover OR on focus, so Tab reaches it. */
+.library-file-row__untag.oj-btn {
+    width: 16px;
+    height: 16px;
+    margin-inline-start: -4px;
+    opacity: 0;
+    transition: opacity var(--motion-fast), color var(--motion-fast);
+}
+
+.library-file-row:hover .library-file-row__untag.oj-btn,
+.library-file-row__untag.oj-btn:focus-visible {
+    opacity: 1;
+}
+
+.library-file-row__untag.oj-btn:hover {
+    color: var(--danger-ink);
+}
+
+.library-file-row__trash.oj-btn,
+.library-file-row__delete.oj-btn {
+    width: 20px;
+    height: 20px;
+    opacity: 0;
+    transition: opacity var(--motion-fast), color var(--motion-fast);
+}
+
+.library-file-row:hover .library-file-row__trash.oj-btn,
+.library-file-row:hover .library-file-row__delete.oj-btn,
+.library-file-row__trash.oj-btn:focus-visible,
+.library-file-row__delete.oj-btn:focus-visible,
+.library-file-row.is-trashed .library-file-row__trash.oj-btn,
+.library-file-row.is-trashed .library-file-row__delete.oj-btn {
+    opacity: 1;
+}
+
+.library-file-row__delete.oj-btn:hover {
+    color: var(--danger-ink);
+}
+
+/* States a row can be in. Each one is a different FACT, so each reads
+   differently: missing (the file left the disk), trashed (you put it away),
+   loading (it is on its way), multi-selected (the marquee caught it). */
+.library-file-row.is-missing .library-file-row__name {
+    color: var(--danger-ink);
+    text-decoration: line-through;
+}
+
+.library-file-row.is-trashed {
+    opacity: 0.6;
+}
+
+.library-file-row.is-trashed .library-file-row__name {
+    text-decoration: line-through;
+}
+
+.library-file-row.is-loading {
+    cursor: progress;
+}
+
+/* Caught by the marquee. `ListRow`'s own selection grammar — the inset ground
+   plus an accent-ink label — with one accent edge on top, because selection in
+   this system is an EDGE, never a colour drench over the row's content. */
+.library-file-row.is-multi-selected {
+    background: var(--bg-tertiary);
+    color: var(--accent-ink);
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.library-file-row.oj-list-row.is-selected {
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+/* The marquee. Same object as the canvas's own selection rectangle. */
+.library-selection-box {
+    position: absolute;
+    border: 1px solid var(--accent-primary);
+    background: color-mix(in oklab, var(--accent-primary) 12%, transparent);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* ---- Empty / scanning -------------------------------------------------- */
+
+.library-onboard {
+    margin: auto;
+    max-width: 320px;
+}
+
+.library-onboard__body,
+.library-onboard__note {
+    margin: 0 0 var(--space-sm);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.library-onboard__note {
+    margin: var(--space-sm) 0 0;
+    color: var(--text-secondary);
+}
+
+.library-onboard__cta.oj-btn {
+    width: 100%;
+}
+
+.library-scanning {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    flex: 1;
+    min-height: 0;
+}
+
+.library-scanning__status {
+    color: var(--text-secondary);
+}
+
+/* Skeleton rows: the panel keeps the shape it is about to have, so nothing
+   jumps when the real rows arrive. A slow shimmer, stilled by the app's
+   blanket reduced-motion rule — at rest it is still a legible placeholder. */
+.library-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.library-skeleton__row {
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    animation: library-skeleton-breathe 1400ms ease-in-out infinite;
+}
+
+.library-skeleton__row:nth-child(2) { animation-delay: 120ms; }
+.library-skeleton__row:nth-child(3) { animation-delay: 240ms; }
+.library-skeleton__row:nth-child(4) { animation-delay: 360ms; }
+.library-skeleton__row:nth-child(5) { animation-delay: 480ms; }
+
+@keyframes library-skeleton-breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* ---- Files that left the disk ------------------------------------------ */
+
+/* The honest-failure banner. Same construction as the confirm strip below —
+   a Callout that does not shrink, prose on the floor, one action — because it
+   is the same shape of thing: the card telling the player something true and
+   handing them the one control that answers it. It is `danger` to match the
+   `--danger-ink` the struck-through rows are already painted in; the banner and
+   the rows are one statement, not two. */
+.library-missing {
+    flex: 0 0 auto;
+}
+
+.library-missing__body {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.library-missing__cta {
+    margin-top: var(--space-sm);
+}
+
+/* ---- The one destructive question -------------------------------------- */
+
+.library-confirm {
+    flex: 0 0 auto;
+}
+
+.library-confirm__body {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.library-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+}
+
+/* ---- Shared quiet prose ------------------------------------------------ */
+
+.library-hint {
+    margin: 0;
+    padding: var(--space-xs);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.library-hint--center {
+    text-align: center;
+    padding: var(--space-lg) var(--space-md);
+}

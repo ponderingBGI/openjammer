@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent } from 'react';
 import { Input } from '../Input/Input';
 import './EditableLabel.css';
@@ -17,6 +17,10 @@ export interface EditableLabelProps {
     placeholder?: string;
     /** Text alignment of both the resting label and the input. */
     align?: 'left' | 'center';
+    /** Uses the exact-value mono face in both display and edit modes. */
+    mono?: boolean;
+    /** Prevents entering or changing edit mode. */
+    disabled?: boolean;
     /** Called with the trimmed draft when committed (Enter or blur). */
     onCommit: (value: string) => void;
     /** Called when editing is abandoned (Escape) — the draft reverts to `value`. */
@@ -26,7 +30,7 @@ export interface EditableLabelProps {
 }
 
 /**
- * Inline-rename label. Rests as a Caveat span (double-click or Enter to edit);
+ * Inline-rename label. Rests as an Outfit label (double-click or Enter to edit);
  * in edit mode it renders an {@link Input} seeded with `value`. Enter and blur
  * commit via `onCommit`; Escape reverts the draft and calls `onCancel`.
  *
@@ -40,6 +44,8 @@ export function EditableLabel({
     defaultEditing = false,
     placeholder,
     align = 'left',
+    mono = false,
+    disabled = false,
     onCommit,
     onCancel,
     className,
@@ -49,6 +55,7 @@ export function EditableLabel({
     const isEditing = isControlled ? editing : internalEditing;
 
     const [draft, setDraft] = useState(value);
+    const suppressNextBlur = useRef(false);
 
     // Reseed the draft each time we enter edit mode so stale edits never linger.
     useEffect(() => {
@@ -62,15 +69,18 @@ export function EditableLabel({
     };
 
     const beginEditing = () => {
+        if (disabled) return;
         if (!isControlled) setInternalEditing(true);
     };
 
     const commit = () => {
+        suppressNextBlur.current = false;
         onCommit(draft.trim());
         stopEditing();
     };
 
     const cancel = () => {
+        suppressNextBlur.current = true;
         setDraft(value);
         onCancel?.();
         stopEditing();
@@ -89,28 +99,13 @@ export function EditableLabel({
     const classes = [
         'oj-editable-label',
         align === 'center' && 'oj-editable-label--center',
+        mono && 'oj-editable-label--mono',
+        disabled && 'is-disabled',
         isEditing && 'is-editing',
         className,
     ]
         .filter(Boolean)
         .join(' ');
-
-    if (isEditing) {
-        return (
-            <span className={classes}>
-                <Input
-                    className="oj-editable-label__input"
-                    value={draft}
-                    placeholder={placeholder}
-                    autoFocus
-                    onFocus={(e: FocusEvent<HTMLInputElement>) => e.target.select()}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    onBlur={commit}
-                />
-            </span>
-        );
-    }
 
     const isEmpty = value.length === 0;
 
@@ -124,11 +119,13 @@ export function EditableLabel({
                     .filter(Boolean)
                     .join(' ')}
                 role="button"
-                tabIndex={0}
+                tabIndex={isEditing || disabled ? -1 : 0}
+                aria-disabled={disabled || undefined}
+                aria-hidden={isEditing || undefined}
                 onDoubleClick={beginEditing}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
                         beginEditing();
                     }
                 }}
@@ -136,6 +133,26 @@ export function EditableLabel({
             >
                 {isEmpty ? placeholder ?? '' : value}
             </span>
+            {isEditing && (
+                <Input
+                    className="oj-editable-label__input"
+                    mono={mono}
+                    disabled={disabled}
+                    value={draft}
+                    placeholder={placeholder}
+                    autoFocus
+                    onFocus={(e: FocusEvent<HTMLInputElement>) => e.target.select()}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => {
+                        if (suppressNextBlur.current) {
+                            suppressNextBlur.current = false;
+                            return;
+                        }
+                        commit();
+                    }}
+                />
+            )}
         </span>
     );
 }

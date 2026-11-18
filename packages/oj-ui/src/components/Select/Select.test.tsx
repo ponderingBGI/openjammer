@@ -11,7 +11,7 @@ describe('Select', () => {
             </Select>,
         );
         const el = container.querySelector('select')!;
-        expect(el.className).toBe('oj-select');
+        expect(el.className).toContain('oj-select');
         expect(el.querySelectorAll('option').length).toBe(2);
     });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Callout, Field, Input, Modal, PanelHeader, ProgressBar, SegmentedControl, Select } from '@openjammer/oj-ui';
+import { Button, Callout, Chip, Field, Input, Modal, PanelHeader, ProgressBar, SegmentedControl, StatusDot, ValueScrubber } from '@openjammer/oj-ui';
 import { toast } from 'sonner';
 import { isTauri } from '../../ai/tauri';
 import { useModalKeymap } from '../../keymap/useKeymap';
@@ -8,19 +8,38 @@ import { useProjectStore } from '../../store/projectStore';
 import { assembleExportArgs, clipWarning, joinExportPath, peakWarning, safeExportFilename } from './exportSpec';
 import { exportBrowser } from './browserExport';
 import { exportNative, revealExport } from './nativeExport';
-import type { BounceSpec, ExportProgress, ExportSampleRate, ExportStats } from './types';
+import type { BounceSpec, ExportBitDepth, ExportFormat, ExportProgress, ExportSampleRate, ExportStats } from './types';
 import { arrangementLengthTicks, tickToSeconds, timebase } from '../../song/time';
 import './ExportDialog.css';
 
-type FormatChoice = 'wav24' | 'wav16' | 'wav32f' | 'flac24' | 'flac16';
+/**
+ * Format and bit depth are two decisions, not one dropdown of five strings.
+ * The browser tier can only write 24-bit WAV, so off the desktop both controls
+ * are locked to what is actually true rather than offering a lie.
+ */
+const FORMATS: { value: ExportFormat; label: string }[] = [
+    { value: 'wav', label: 'WAV' },
+    { value: 'flac', label: 'FLAC' },
+];
 
-const CHOICES: Record<FormatChoice, Pick<BounceSpec, 'format' | 'bitDepth'>> = {
-    wav24: { format: 'wav', bitDepth: '24' },
-    wav16: { format: 'wav', bitDepth: '16' },
-    wav32f: { format: 'wav', bitDepth: '32f' },
-    flac24: { format: 'flac', bitDepth: '24' },
-    flac16: { format: 'flac', bitDepth: '16' },
+const BIT_DEPTHS: Record<ExportFormat, { value: ExportBitDepth; label: string }[]> = {
+    wav: [
+        { value: '16', label: '16-bit' },
+        { value: '24', label: '24-bit' },
+        { value: '32f', label: '32-bit float' },
+    ],
+    flac: [
+        { value: '16', label: '16-bit' },
+        { value: '24', label: '24-bit' },
+    ],
 };
+
+const SAMPLE_RATES: { value: string; label: string }[] = [
+    { value: '44100', label: '44.1 kHz' },
+    { value: '48000', label: '48 kHz' },
+    { value: '88200', label: '88.2 kHz' },
+    { value: '96000', label: '96 kHz' },
+];
 
 interface Props {
     open: boolean;
@@ -63,7 +82,8 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
     const native = isTauri();
     const projectName = useProjectStore((state) => state.name);
     const [filename, setFilename] = useState(() => safeExportFilename(projectName ?? arrangement.name));
-    const [choice, setChoice] = useState<FormatChoice>('wav24');
+    const [format, setFormat] = useState<ExportFormat>('wav');
+    const [bitDepth, setBitDepth] = useState<ExportBitDepth>('24');
     const [sampleRate, setSampleRate] = useState<ExportSampleRate>(48_000);
     const [tailMode, setTailMode] = useState<'auto' | 'fixed'>('auto');
     const [tailSeconds, setTailSeconds] = useState(2);
@@ -77,9 +97,10 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
 
     const spec = useMemo<BounceSpec>(() => ({
         sampleRate,
-        ...CHOICES[choice],
+        format,
+        bitDepth,
         tail: tailMode === 'auto' ? { mode: 'auto' } : { mode: 'fixed', seconds: Math.max(0, tailSeconds) },
-    }), [choice, sampleRate, tailMode, tailSeconds]);
+    }), [bitDepth, format, sampleRate, tailMode, tailSeconds]);
     const preflight = useMemo(() => {
         const lengthTicks = arrangementLengthTicks(arrangement);
         const seconds = tickToSeconds(arrangement, lengthTicks) + (tailMode === 'fixed' ? Math.max(0, tailSeconds) : 0);
@@ -88,8 +109,11 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
         return `${Math.ceil(lengthTicks / timebase(arrangement).ticksPerBar)} bars · ${formatPreflightDuration(seconds)} · ≈${megabytes} MB`;
     }, [arrangement, sampleRate, spec.bitDepth, tailMode, tailSeconds]);
 
+    /** While a render is in flight every control is frozen — the file is being written. */
+    const busy = status === 'exporting';
+
     const close = () => {
-        if (status !== 'exporting') onClose();
+        if (!busy) onClose();
     };
 
     const reportProgress = (next: ExportProgress) => {
@@ -145,74 +169,153 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
     };
 
     return (
-        <Modal open={open} onClose={close} closeOnScrim={status !== 'exporting'} ariaLabel="Export song" align="top" size="md">
-            <PanelHeader title="Export song" onClose={status === 'exporting' ? undefined : close} />
+        <Modal open={open} onClose={close} closeOnScrim={!busy} ariaLabel="Export song" align="top" size="md">
+            <PanelHeader title="Export song" onClose={busy ? undefined : close} />
             <div className="export-dialog">
                 <p className="export-dialog__intro">Make a finished audio file from this arrangement.</p>
                 <div className="export-dialog__form">
-                    <Field className="export-dialog__filename" label="Filename" htmlFor="export-filename">
-                        <Input id="export-filename" value={filename} onChange={(event) => setFilename(event.target.value)} disabled={status === 'exporting'} />
+                    <Field className="export-dialog__wide" label="Filename" htmlFor="export-filename">
+                        <Input id="export-filename" value={filename} onChange={(event) => setFilename(event.target.value)} disabled={busy} />
                     </Field>
-                    <Field label="Format" htmlFor="export-format">
-                        <Select id="export-format" value={choice} onChange={(event) => setChoice(event.target.value as FormatChoice)} disabled={status === 'exporting'}>
-                            <option value="wav24">WAV 24-bit — recommended</option>
-                            <option value="wav16" disabled={!native}>WAV 16-bit, dithered{!native ? ' — desktop only' : ''}</option>
-                            <option value="wav32f" disabled={!native}>WAV 32-bit float{!native ? ' — desktop only' : ''}</option>
-                            <option value="flac24" disabled={!native}>FLAC 24-bit{!native ? ' — desktop only' : ''}</option>
-                            <option value="flac16" disabled={!native}>FLAC 16-bit{!native ? ' — desktop only' : ''}</option>
-                        </Select>
+
+                    {/* Off the desktop there is no choice to make, so the value is
+                        STATED rather than shown as a greyed-out control you cannot
+                        read the selection off. */}
+                    <Field label="Format" description={native ? undefined : 'FLAC is desktop only'}>
+                        {native ? (
+                            <SegmentedControl
+                                aria-label="Export format"
+                                value={format}
+                                disabled={busy}
+                                options={FORMATS}
+                                onChange={(next) => {
+                                    setFormat(next);
+                                    // FLAC has no 32-bit float — keep the pair legal.
+                                    if (next === 'flac' && bitDepth === '32f') setBitDepth('24');
+                                }}
+                            />
+                        ) : (
+                            <span className="export-dialog__fixed" aria-label="Export format">
+                                <Chip>WAV</Chip>
+                            </span>
+                        )}
                     </Field>
-                    <Field label="Sample rate" htmlFor="export-rate">
-                        <Select id="export-rate" value={sampleRate} onChange={(event) => setSampleRate(Number(event.target.value) as ExportSampleRate)} disabled={status === 'exporting'}>
-                            <option value={48_000}>48 kHz — recommended</option>
-                            <option value={44_100}>44.1 kHz</option>
-                            <option value={88_200}>88.2 kHz</option>
-                            <option value={96_000}>96 kHz</option>
-                        </Select>
+
+                    <Field label="Bit depth" description={native ? undefined : 'The browser writes 24-bit'}>
+                        {native ? (
+                            <SegmentedControl
+                                aria-label="Bit depth"
+                                value={bitDepth}
+                                disabled={busy}
+                                options={BIT_DEPTHS[format]}
+                                onChange={setBitDepth}
+                            />
+                        ) : (
+                            <span className="export-dialog__fixed" aria-label="Bit depth">
+                                <Chip>24-bit</Chip>
+                            </span>
+                        )}
                     </Field>
-                    <fieldset className="export-dialog__tail" disabled={status === 'exporting'}>
-                        <legend>Tail</legend>
-                        <SegmentedControl aria-label="Export tail" className="export-dialog__tail-options" value={tailMode} disabled={status === 'exporting'} onChange={setTailMode} options={[{ value: 'auto', label: 'Auto — listen for the ring-out' }, { value: 'fixed', label: 'Fixed' }]} />
-                        {tailMode === 'fixed' && <Input aria-label="Tail seconds" type="number" min={0} step={0.1} value={tailSeconds} onChange={(event) => setTailSeconds(Number(event.target.value))} />}
-                        {tailMode === 'fixed' && <span className="export-dialog__unit">seconds</span>}
-                    </fieldset>
+
+                    <Field className="export-dialog__wide" label="Sample rate">
+                        <SegmentedControl
+                            aria-label="Sample rate"
+                            value={String(sampleRate)}
+                            disabled={busy}
+                            options={SAMPLE_RATES}
+                            onChange={(next) => setSampleRate(Number(next) as ExportSampleRate)}
+                        />
+                    </Field>
+
+                    <Field className="export-dialog__wide" label="Tail" description="How much of the ring-out to keep after the last note.">
+                        <div className="export-dialog__tail">
+                            <SegmentedControl
+                                aria-label="Export tail"
+                                value={tailMode}
+                                disabled={busy}
+                                onChange={setTailMode}
+                                options={[{ value: 'auto', label: 'Auto — listen for the ring-out' }, { value: 'fixed', label: 'Fixed' }]}
+                            />
+                            {tailMode === 'fixed' && (
+                                <ValueScrubber
+                                    label="Length"
+                                    value={tailSeconds}
+                                    display={`${tailSeconds.toFixed(1)} s`}
+                                    disabled={busy}
+                                    onCommit={(next) => setTailSeconds(Math.max(0, next))}
+                                    onWheel={(event) => {
+                                        if (busy) return;
+                                        event.preventDefault();
+                                        setTailSeconds((current) => Math.max(0, Number((current + (event.deltaY < 0 ? 0.1 : -0.1)).toFixed(1))));
+                                    }}
+                                />
+                            )}
+                        </div>
+                    </Field>
+
                     {native ? (
-                        <Field label="Destination folder" htmlFor="export-destination">
+                        <Field className="export-dialog__wide" label="Destination folder" htmlFor="export-destination">
                             <div className="export-dialog__destination">
-                                <Input id="export-destination" value={destination} placeholder="Choose a folder or type its full path" onChange={(event) => setDestination(event.target.value)} disabled={status === 'exporting'} />
-                                <Button type="button" disabled={status === 'exporting'} onClick={() => void chooseDestination()}>Choose…</Button>
+                                <Input mono id="export-destination" value={destination} placeholder="Choose a folder or type its full path" onChange={(event) => setDestination(event.target.value)} disabled={busy} />
+                                <Button type="button" disabled={busy} onClick={() => void chooseDestination()}>Choose…</Button>
                             </div>
                         </Field>
-                    ) : <p className="export-dialog__destination-note">Destination: your browser’s Downloads folder.</p>}
+                    ) : <p className="export-dialog__destination-note export-dialog__wide">Destination: your browser’s Downloads folder.</p>}
                 </div>
 
-                <p className="export-dialog__preflight" aria-label="Estimated export size">{preflight}</p>
+                <div className="export-dialog__preflight" aria-label="Estimated export size">
+                    <Chip>{preflight}</Chip>
+                </div>
                 <p className="export-dialog__advice">24-bit WAV or FLAC at 44.1/48 kHz is what streaming services want.</p>
-                {!native && <Callout variant="info">Browser export steps the wasm engine faster than real time and writes 24-bit WAV. FLAC and 16-bit dither are desktop-only.</Callout>}
+                {!native && <Callout variant="info" title="Browser export">Steps the wasm engine faster than real time and writes 24-bit WAV. FLAC and 16-bit dither are desktop-only.</Callout>}
 
                 {status === 'exporting' && (
                     <div className="export-dialog__progress">
                         <ProgressBar value={progress} max={100} aria-label="Song export progress" />
-                        <p>Writing the song… {progress}%</p>
+                        <p className="export-dialog__progress-line">Writing the song… <span className="export-dialog__mono">{progress}%</span></p>
                         <p className="export-dialog__cancel-note">This renderer has no safe cancellation seam yet, so the dialog stays put until the file is finished.</p>
                     </div>
                 )}
                 <div className="sr-only" aria-live="polite">{progressText}</div>
                 {status === 'error' && <Callout variant="danger" title="Export stopped">{error}</Callout>}
                 {stats && (
-                    <section className="export-stats" aria-label="Export statistics">
-                        <div><span>Duration</span><strong>{formatDuration(stats.frames, stats.sampleRate)}</strong></div>
-                        <div className={peakWarning(stats.maxSamplePeakDbfs) ? 'is-warning' : ''}><span>Peak (dBFS proxy)</span><strong>{displayPeak(stats.maxSamplePeakDbfs)}</strong></div>
-                        <div className={clipWarning(stats.clippedSampleCount) ? 'is-danger' : ''}><span>Clipped samples</span><strong>{stats.clippedSampleCount.toLocaleString()}</strong></div>
+                    <Callout
+                        className="export-stats"
+                        variant={clipWarning(stats.clippedSampleCount) ? 'danger' : peakWarning(stats.maxSamplePeakDbfs) ? 'warning' : 'success'}
+                        title={clipWarning(stats.clippedSampleCount) ? 'Exported, but it clipped' : 'Exported'}
+                        aria-label="Export statistics"
+                    >
+                        <div className="export-stats__grid">
+                            <div className="export-stats__cell">
+                                <span>Duration</span>
+                                <strong className="export-dialog__mono">{formatDuration(stats.frames, stats.sampleRate)}</strong>
+                            </div>
+                            <div className="export-stats__cell">
+                                <span>Peak (dBFS proxy)</span>
+                                <strong className="export-dialog__mono">
+                                    <StatusDot status={peakWarning(stats.maxSamplePeakDbfs) ? 'warn' : 'ok'} />
+                                    {displayPeak(stats.maxSamplePeakDbfs)}
+                                </strong>
+                            </div>
+                            <div className="export-stats__cell">
+                                <span>Clipped samples</span>
+                                <strong className="export-dialog__mono">
+                                    <StatusDot status={clipWarning(stats.clippedSampleCount) ? 'bad' : 'ok'} />
+                                    {stats.clippedSampleCount.toLocaleString()}
+                                </strong>
+                            </div>
+                        </div>
                         {clipWarning(stats.clippedSampleCount) && <p className="export-stats__hint">A few samples hit the ceiling. Lower the master fader and try once more.</p>}
                         <p className="export-stats__path">{stats.path}</p>
-                        {native && <Button onClick={() => void revealExport(stats.path)}>Reveal file</Button>}
-                        <Button variant="ghost" onClick={() => setStats(null)}>Dismiss results</Button>
-                    </section>
+                        <div className="export-stats__actions">
+                            {native && <Button onClick={() => void revealExport(stats.path)}>Reveal file</Button>}
+                            <Button variant="ghost" onClick={() => setStats(null)}>Dismiss results</Button>
+                        </div>
+                    </Callout>
                 )}
                 <div className="export-dialog__actions">
-                    <Button variant="ghost" onClick={close} disabled={status === 'exporting'}>{stats ? 'Close' : 'Not now'}</Button>
-                    <Button variant="primary" onClick={() => void start()} disabled={status === 'exporting' || !filename.trim()}>{status === 'exporting' ? 'Exporting…' : 'Export song'}</Button>
+                    <Button variant="ghost" onClick={close} disabled={busy}>{stats ? 'Close' : 'Not now'}</Button>
+                    <Button variant="primary" loading={busy} onClick={() => void start()} disabled={busy || !filename.trim()}>{busy ? 'Exporting…' : 'Export song'}</Button>
                 </div>
             </div>
         </Modal>

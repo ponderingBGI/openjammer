@@ -143,6 +143,8 @@ export class OjcoreWasmExecutor implements Executor {
     private ready = false;
     /** Graphs requested before the worklet was ready are coalesced to the last. */
     private pendingGraph: OjGraph | null = null;
+    /** Last audio IR sent/queued; canvas-only state must never repush audio. */
+    private lastPushedGraph: string | null = null;
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
@@ -303,7 +305,9 @@ export class OjcoreWasmExecutor implements Executor {
                     node.port.postMessage({ type: 'meters', enabled: true });
                     // Flush any graph that arrived before the worklet was ready.
                     if (this.pendingGraph) {
-                        this.sendGraph(this.pendingGraph);
+                        if (this.sendGraph(this.pendingGraph)) {
+                            this.lastPushedGraph = JSON.stringify(this.pendingGraph);
+                        }
                         this.pendingGraph = null;
                     }
                     // Now that the worklet can receive PCM, give instrument nodes
@@ -428,6 +432,7 @@ export class OjcoreWasmExecutor implements Executor {
         }
         this.node = null;
         this.ready = false;
+        this.lastPushedGraph = null;
         this.pendingGraph = null;
         this.transportCallbacks.clear();
         this.liveNoteCallbacks.clear();
@@ -456,6 +461,7 @@ export class OjcoreWasmExecutor implements Executor {
      *  wasm path has no native plugin hosting, so this is a plain re-emit; it exists
      *  so the shared `Executor` surface is uniform. */
     resync(): void {
+        this.lastPushedGraph = null;
         this.pushGraph();
     }
 
@@ -491,8 +497,17 @@ export class OjcoreWasmExecutor implements Executor {
         // Re-apply any live sampler bindings so a loaded sample survives later
         // node/connection edits (mirrors native keeping the bind in `last_graph`).
         this.applySampleBindings(wasmGraph);
+        const serialized = JSON.stringify(wasmGraph);
+        if (serialized === this.lastPushedGraph) {
+            this.loadDefaultInstrumentVoices();
+            return;
+        }
         if (this.ready) {
-            this.sendGraph(wasmGraph);
+            if (this.sendGraph(wasmGraph)) {
+                // Record dedupe state only after publication succeeds. A failed or
+                // unavailable post must leave an identical next edit free to retry.
+                this.lastPushedGraph = serialized;
+            }
             // Give melodic instrument nodes a built-in default voice so they are
             // playable without a user-loaded sample (parity with native). Guarded
             // to load once per node — `applySampleBindings` then persists it across
@@ -778,10 +793,11 @@ export class OjcoreWasmExecutor implements Executor {
         resolve(monoPcmToWavBlob(pcm, sampleRate ?? ctx?.sampleRate ?? 48000));
     }
 
-    private sendGraph(graph: OjGraph): void {
-        if (!this.node) return;
+    private sendGraph(graph: OjGraph): boolean {
+        if (!this.node) return false;
         const bytes = this.encoder.encode(JSON.stringify(graph));
         this.node.port.postMessage({ type: 'graph', bytes }, [bytes.buffer]);
+        return true;
     }
 
     private send(cmd: RtCommand): void {

@@ -1,0 +1,35 @@
+/* The honest-latency chip and the popover that carries its detail. */
+
+.oj-latency-chip {
+    position: relative;
+    display: inline-flex;
+}
+
+.oj-latency-chip__trigger {
+    display: inline-flex;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-radius: var(--radius-pill);
+}
+
+.oj-latency-chip__trigger:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.oj-latency-chip__popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(340px, 90vw);
+    z-index: var(--z-popover);
+}
+
+.oj-latency-chip__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+}

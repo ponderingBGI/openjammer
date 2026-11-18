@@ -462,6 +462,13 @@ export default function register(pi: ExtensionAPI): void {
                     op: Type.Literal('transposeNotes'), noteIds: Type.Array(Type.String()),
                     semitones: Type.Number(),
                 }),
+                // The roll's Knife (U11). `atTick` is a SOURCE tick, the same
+                // coordinate `note.tick` is in; both halves must clear
+                // `minLengthTick` (default: the draw floor) or the cut is a no-op.
+                Type.Object({
+                    op: Type.Literal('splitNotes'), noteIds: Type.Array(Type.String()),
+                    atTick: Type.Number(), minLengthTick: Type.Optional(Type.Number()),
+                }),
                 Type.Object({
                     op: Type.Literal('quantizeNotes'), targets: Type.Array(Type.String()), grid: Type.Number(),
                     endGrid: Type.Optional(Type.Number()), snapStart: Type.Optional(Type.Boolean()),
@@ -483,6 +490,15 @@ export default function register(pi: ExtensionAPI): void {
                     fromTick: Type.Number(), toTick: Type.Number(),
                     points: Type.Array(Type.Object({ tick: Type.Number(), value: Type.Number() })),
                     factor: Type.Optional(Type.Number()),
+                }),
+                Type.Object({
+                    op: Type.Literal('createClip'), trackId: Type.String(),
+                    startTick: Type.Number(), lengthTick: Type.Number(),
+                    name: Type.Optional(Type.String()),
+                }),
+                Type.Object({
+                    op: Type.Literal('addMarker'), atTick: Type.Number(),
+                    name: Type.Optional(Type.String()),
                 }),
                 Type.Object({
                     op: Type.Literal('thinAutomation'), laneId: Type.String(), factor: Type.Optional(Type.Number()),

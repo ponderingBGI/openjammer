@@ -1,0 +1,57 @@
+/* EffectNode — the built-in effects faceplate.
+ *
+ * Two rows: what the box is, then what it is doing. The dials wrap and centre,
+ * so a one-knob Reverb and a three-knob Delay are the same card with more or
+ * less on it rather than two different layouts.
+ *
+ * Written in W5-P6 (the body was a native `<select>`, three stacked sliders and
+ * eight inline style objects, on chrome inherited from the deleted BaseNode.css).
+ */
+
+.effect-node {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 168px;
+}
+
+/* ---- The type picker ---------------------------------------------------- */
+.effect-picker {
+    position: relative;
+}
+
+.effect-picker__trigger.oj-btn {
+    justify-content: space-between;
+    gap: var(--space-sm);
+    width: 100%;
+}
+
+.effect-picker__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.effect-picker__menu {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    right: 0;
+    z-index: var(--z-popover);
+    min-width: 100%;
+}
+
+/* The type this node currently is. Ink, not a fill — the row is a choice, not
+   an engaged control. */
+.effect-picker__menu .oj-menu-item.is-current {
+    color: var(--accent-ink);
+}
+
+/* ---- The dials ---------------------------------------------------------- */
+.effect-dials {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: center;
+    gap: var(--space-md) var(--space-lg);
+}

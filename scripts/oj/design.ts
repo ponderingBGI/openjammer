@@ -12,7 +12,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, relative, sep } from 'node:path';
 
 const ROOT = join(import.meta.dir, '..', '..');
 const FIGMA_FILE_KEY = 'ayHEMsJL1BPhvTYWi1CFJs';
@@ -20,6 +20,19 @@ const FIGMA_FILE_SLUG = 'OpenJammer-oj-ui-Library';
 const LADLE_META = join(ROOT, '.ladle', 'build', 'meta.json');
 const DS_CONFIG = join(ROOT, '.design-sync', 'config.json');
 const MAP_PATH = join(ROOT, 'component-map.json');
+
+/**
+ * A repo-relative path with POSIX separators, whatever the host OS.
+ *
+ * Every path this map publishes is a URL fragment in disguise: `codePath` is
+ * read by the docs "Find the code" index and `githubUrl` is `codePath` glued
+ * onto a github.com/blob URL. On Windows both used to come out as absolute
+ * `C:\Users\...\Button.tsx` — the old code stripped a literal `${ROOT}/`
+ * prefix, but `ROOT` is built with `join` (backslashes) so the prefix never
+ * matched and the separators were wrong twice over. `relative` does the
+ * stripping structurally; the `sep` split does the normalising.
+ */
+const repoRelative = (file: string): string => relative(ROOT, file).split(sep).join('/');
 
 const kebab = (s: string): string =>
   s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
@@ -80,8 +93,19 @@ function parseCodeConnect(): Array<{ component: string; figmaNode: string; file:
   }));
 }
 
-/** Build { kebab-component-name -> first story id } from the Ladle build meta, plus a
- *  dir-based fallback map { component-dir -> first story id }. */
+/**
+ * Build { kebab-component-name -> the story that best REPRESENTS the component }
+ * from the Ladle build meta, plus a dir-based fallback map
+ * { component-dir -> the same choice }.
+ *
+ * The map is read by Figma reviewers jumping from a frame to the live story, so
+ * the link has to land on the canonical overview rather than on whichever
+ * variant happens to sort first. Every component that has one publishes a
+ * `states` story for exactly that purpose, so `states` wins when it exists;
+ * otherwise the first id in sort order keeps the choice deterministic.
+ * (Without the preference, adding a `loading` story silently moved Button's
+ * link from `button--states` to `button--loading`.)
+ */
 function ladleStories(): { byName: Map<string, string>; byDir: Map<string, string> } {
   const byName = new Map<string, string>();
   const byDir = new Map<string, string>();
@@ -89,18 +113,18 @@ function ladleStories(): { byName: Map<string, string>; byDir: Map<string, strin
   const meta = JSON.parse(readFileSync(LADLE_META, 'utf8')) as {
     stories: Record<string, { filePath?: string }>;
   };
-  // Sort ids for deterministic "first story" selection.
+  // id is <namespace>--<component>--<variant>; the variant may itself contain `--`.
+  const isOverview = (id: string): boolean => id.split('--').slice(2).join('--') === 'states';
+  const choose = (map: Map<string, string>, key: string, id: string): void => {
+    const held = map.get(key);
+    if (held === undefined || (isOverview(id) && !isOverview(held))) map.set(key, id);
+  };
+  // Sort ids so the fallback ("first story") is deterministic.
   for (const id of Object.keys(meta.stories).sort()) {
-    const parts = id.split('--'); // <namespace>--<component>--<variant>
-    if (parts.length >= 2) {
-      const mid = parts[1];
-      if (!byName.has(mid)) byName.set(mid, id);
-    }
+    const parts = id.split('--');
+    if (parts.length >= 2) choose(byName, parts[1], id);
     const fp = meta.stories[id].filePath;
-    if (fp) {
-      const dir = basename(dirname(fp)); // component dir, e.g. "Banner"
-      if (!byDir.has(dir)) byDir.set(dir, id);
-    }
+    if (fp) choose(byDir, basename(dirname(fp)), id); // component dir, e.g. "Banner"
   }
   return { byName, byDir };
 }
@@ -129,9 +153,7 @@ function buildMap(): ComponentMap {
       const nodeUrlId = nodeId.replace(':', '-');
       const figmaUrl = `https://www.figma.com/design/${FIGMA_FILE_KEY}/${FIGMA_FILE_SLUG}?node-id=${nodeUrlId}`;
       // code path: the .figma.tsx sits beside its source file (same basename).
-      const codePath = file
-        ? file.replace(`${ROOT}/`, '').replace(/\.figma\.tsx$/, '.tsx')
-        : '';
+      const codePath = file ? repoRelative(file).replace(/\.figma\.tsx$/, '.tsx') : '';
       const dir = codePath ? basename(dirname(codePath)) : '';
       const story = byName.get(kebab(component)) ?? byDir.get(dir) ?? null;
       return {

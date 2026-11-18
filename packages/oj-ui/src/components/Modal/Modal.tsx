@@ -30,7 +30,7 @@ const FOCUSABLE =
 
 /**
  * An accessible overlay dialog. A full-viewport scrim (the `--overlay-scrim`
- * wash, no blur — DESIGN.md Hard-Shadow) aligns a lifted Surface panel as a
+ * wash and guarded backdrop blur) aligns an overlay Surface panel as a
  * `role="dialog"`. Escape and an optional scrim click close it; focus moves
  * into the panel on open, Tab is trapped within it, and the previously-focused
  * element is restored on close. Theme-agnostic: styled only via semantic CSS
@@ -118,7 +118,8 @@ export function Modal({
             onKeyDown={onKeyDown}
         >
             <Surface
-                elevation="lifted"
+                elevation="overlay"
+                radius="xl"
                 role="dialog"
                 aria-modal="true"
                 aria-label={ariaLabel}

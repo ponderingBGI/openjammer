@@ -6,6 +6,7 @@
  */
 
 import { Component, type ReactNode } from 'react';
+import { Button } from '@openjammer/oj-ui';
 
 interface Props {
     children: ReactNode;
@@ -43,9 +44,9 @@ export class KeybindingsErrorBoundary extends Component<Props, State> {
                         An error occurred while rendering the keybindings panel.
                         This may have been caused by invalid keybinding data.
                     </p>
-                    <button onClick={this.handleReset}>
+                    <Button variant="primary" onClick={this.handleReset}>
                         Try Again
-                    </button>
+                    </Button>
                 </div>
             );
         }

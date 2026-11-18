@@ -1,98 +1,50 @@
 /*
  * OpenJammer — /download
- * The Living Sketchbook, hand-authored (no framework, no theme to fight).
- * Warm paper + dot grid, ink line, Caveat voice, hard blur-free offset shadows.
- * See DESIGN.md. Fonts are the PWA's own /fonts/*.woff2 (same build, visible here).
  *
- * Color contract (from the plan / DESIGN.md):
- *   ink      #1A1A1A   the drawn line, body text, button fill
- *   paper    #F5F0E8   the page
- *   walnut   #6B5B4F   primary-button hover
- *   pine     #4A7C59   the Apple-Silicon "Recommended" highlight (state, w/ a label)
- *   blue     #4A90C2   borders / large accents ONLY  (fails 4.5:1 as text on paper)
- *   blue-out #2C5F88   body LINK text (~6.4:1 on paper — passes AA)
- * BANNED: glassmorphism, glowing gradients, blurred shadows, gradient text,
- *         side-stripe borders, SaaS chrome. Every box-shadow blur radius is 0.
+ * The New DNA ("A Real Instrument"), hand-authored: no framework, no build step.
+ * Calm warm-neutral ground under a faint dot grid, white surface cards with a
+ * single hairline edge and soft layered depth, Outfit as the voice, JetBrains
+ * Mono only where a value must be read exactly. See DESIGN.md.
+ *
+ * TOKENS ONLY. Every colour, radius, shadow, size and curve below is a
+ * `var(--…)` resolved from `/download/oj-tokens.css`, which transcribes the DTCG
+ * sources in `packages/oj-tokens/` for the two static web surfaces (this page has
+ * no React and therefore no `applyTheme()` to inject them at runtime). A literal
+ * colour, a `2px solid` border or a zero-blur offset shadow in this file is a
+ * bug, and `src/components/__tests__/webSurfaces.test.ts` fails on all three.
+ *
+ * Exactly two themes, both live here: the OS preference and an explicit
+ * `[data-theme]` are both wired in the token sheet, so this file never names a
+ * theme at all.
+ *
+ * The blanket reduced-motion rule at the bottom is the one thing DESIGN.md §4
+ * normally forbids a stylesheet from shipping — it lives once in
+ * `src/styles/global.css` for the app. This page is outside the app bundle and
+ * loads no global.css, so it carries its own copy of the same rule.
  */
 
-/* ---- fonts: reuse the PWA's woff2 (public/fonts → /fonts in the build) ---- */
+/* ---- fonts: reuse the PWA's woff2 (public/fonts → /fonts in the build) ----
+   Same faces, same weights, same `font-display` as src/styles/fonts.css. */
 @font-face {
-  font-family: 'Caveat';
-  font-weight: 400;
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 400 700;
   font-display: swap;
-  src: url('/fonts/caveat-regular.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Caveat';
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/caveat-bold.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/inter-regular.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/inter-medium.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/inter-semibold.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/inter-bold.woff2') format('woff2');
+  src: url('/fonts/outfit-variable.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono';
+  font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url('/fonts/jetbrains-mono-regular.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono';
+  font-style: normal;
   font-weight: 500;
   font-display: swap;
   src: url('/fonts/jetbrains-mono-medium.woff2') format('woff2');
-}
-
-:root {
-  --oj-ink: #1a1a1a;
-  --oj-ink-soft: #4a4a4a;
-  --oj-ink-muted: #8a8a8a;
-  --oj-paper: #f5f0e8;
-  --oj-paper-panel: #ede8e0;
-  --oj-sand: #e8e3da;
-  --oj-white: #ffffff;
-  --oj-border-subtle: #d4cfc6;
-  --oj-walnut: #6b5b4f;
-  --oj-pine: #4a7c59;
-  --oj-ochre: #c68b3f;
-  --oj-blue: #4a90c2;
-  --oj-blue-out: #2c5f88; /* link text — passes 4.5:1 on paper */
-
-  --oj-shadow-rest: 2px 3px 0 rgba(0, 0, 0, 0.1);
-  --oj-shadow-lift: 3px 4px 0 rgba(0, 0, 0, 0.15);
-  --oj-shadow-ink: 2px 2px 0 var(--oj-ink);
-
-  --oj-r-sm: 6px;
-  --oj-r-md: 10px;
-  --oj-r-lg: 14px;
-  --oj-r-xl: 20px;
-  --oj-r-pill: 50px;
-
-  --oj-font-voice: 'Caveat', 'Comic Sans MS', cursive;
-  --oj-font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --oj-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 * {
@@ -103,182 +55,209 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The stage: calm warm neutral, printed with the same faint dot grid the canvas
+   draws (`.node-canvas-grid`) — same colour token, same 20px pitch. */
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: var(--oj-font-body);
-  font-size: 16px;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-weight: 500;
   line-height: 1.5;
-  color: var(--oj-ink);
-  background-color: var(--oj-paper);
-  /* dot-grid paper */
-  background-image: radial-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px);
-  background-size: 24px 24px;
+  color: var(--text-primary);
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(circle, var(--border-subtle) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .oj-page {
   max-width: 720px;
   margin: 0 auto;
-  padding: clamp(1.5rem, 5vw, 4rem) clamp(1rem, 4vw, 2rem) 3rem;
+  padding: clamp(var(--space-lg), 5vw, calc(var(--space-xl) * 2)) clamp(var(--space-md), 4vw, var(--space-xl)) var(--space-xl);
 }
 
 /* ---- header ---- */
 .oj-head {
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-lg);
 }
 
 .oj-back {
   display: inline-block;
-  font-family: var(--oj-font-body);
-  font-weight: 500;
-  font-size: 0.95rem;
-  color: var(--oj-blue-out);
+  margin-bottom: var(--space-md);
+  border-radius: var(--radius-sm);
+  color: var(--accent-ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
   text-decoration: none;
-  margin-bottom: 1.25rem;
 }
 .oj-back:hover {
   text-decoration: underline;
 }
 
+/* Display voice — the top of the type scale, never past it. */
 .oj-title {
-  font-family: var(--oj-font-voice);
+  margin: 0 0 var(--space-sm);
+  font-size: clamp(var(--text-xl), 6vw, var(--text-2xl));
   font-weight: 700;
-  font-size: clamp(2.6rem, 8vw, 3.6rem);
-  line-height: 1.05;
-  letter-spacing: 0.2px;
-  margin: 0 0 0.5rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
 }
 
 .oj-sub {
-  font-family: var(--oj-font-body);
-  font-size: 1.1rem;
-  color: var(--oj-ink-soft);
   max-width: 46ch;
   margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1.45;
 }
 
-/* ---- primary detected-OS card ---- */
+/* ---- surfaces: the detected-OS card and the all-platforms card ---- */
 .oj-primary {
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-lg);
+}
+
+.oj-card,
+.oj-other {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-node);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* ONE inner gutter, named once: "Download for Windows", "All platforms" and the
+   version line under the primary card all start on the SAME left edge. The two
+   cards used to disagree (a clamp vs a flat 16px) and the version line was inset
+   by neither, so three things that read as one column began in three places. */
+.oj-page {
+  --oj-card-pad: clamp(var(--space-md), 4vw, var(--space-xl));
 }
 
 .oj-card {
-  border: 2px solid var(--oj-ink);
-  border-radius: var(--oj-r-xl);
-  background: var(--oj-white);
-  box-shadow: var(--oj-shadow-lift);
-  padding: clamp(1.25rem, 4vw, 2rem);
+  border-radius: var(--radius-xl);
+  padding: var(--oj-card-pad);
+}
+
+.oj-other {
+  border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--oj-card-pad) var(--space-sm);
+  margin-bottom: var(--space-lg);
 }
 
 .oj-card-os {
-  font-family: var(--oj-font-voice);
-  font-weight: 700;
-  font-size: 1.9rem;
-  line-height: 1.1;
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .oj-card-note {
-  font-family: var(--oj-font-body);
-  font-size: 1rem;
-  color: var(--oj-ink-soft);
-  margin: 0 0 1.25rem;
+  margin: 0 0 var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
 }
 
 .oj-card .oj-btn-row {
   margin-bottom: 0;
 }
 
+/* Sits on the ground BELOW the card, so it takes the card's own gutter to land
+   on the same left edge as the heading above it. */
 .oj-version-line {
-  font-family: var(--oj-font-body);
-  font-size: 0.9rem;
-  color: var(--oj-ink-muted);
-  margin: 0.85rem 0 0;
+  margin: var(--space-sm) 0 0;
+  padding-inline: var(--oj-card-pad);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }
 
+/* A version string is an exact value, so it is mono, on the inset. */
 .oj-version {
-  font-family: var(--oj-font-mono);
-  font-weight: 500;
-  font-size: 0.9rem;
-  color: var(--oj-ink);
-  background: var(--oj-sand);
-  border: 1px solid var(--oj-border-subtle);
-  border-radius: var(--oj-r-sm);
   padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ---- buttons (links to github.com) ---- */
+/* ---- buttons (links to github.com) ----
+   Button physics from DESIGN.md §5: flat construction, no border and no shadow
+   at rest, 120ms colour, 0.96 press. The detected card gets the accent fill;
+   the all-platforms list below gets the inset fill. */
 .oj-btn-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
 }
 
 .oj-btn {
   display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
   flex: 1 1 auto;
-  min-width: 12rem;
+  align-items: center;
   justify-content: center;
-  font-family: var(--oj-font-body);
+  gap: var(--space-sm);
+  min-width: 12rem;
+  padding: 9px var(--space-md);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-family: inherit;
+  font-size: var(--text-md);
   font-weight: 600;
-  font-size: 1rem;
   text-align: center;
   text-decoration: none;
-  color: var(--oj-paper);
-  background: var(--oj-ink);
-  border: 2px solid var(--oj-ink);
-  border-radius: var(--oj-r-md);
-  padding: 0.7rem 1.1rem;
-  box-shadow: var(--oj-shadow-ink);
   cursor: pointer;
-  transition:
-    transform 0.08s,
-    box-shadow 0.08s,
-    background 0.08s;
+  transition: background var(--motion-fast), transform var(--motion-spring);
 }
 .oj-btn:hover {
-  background: var(--oj-walnut);
-  transform: translateY(-1px);
-  box-shadow: 3px 3px 0 var(--oj-ink);
+  background: var(--accent-secondary);
 }
 .oj-btn:active {
-  transform: translateY(1px);
-  box-shadow: 1px 1px 0 var(--oj-ink);
+  transform: scale(var(--press-scale-btn));
 }
 
-/* The "Recommended" state is a TEXT CHIP — never color alone. */
+/* The "Recommended" state is a TEXT CHIP — never colour alone — and it is a
+   CAPTION ABOVE THE PAIR, not a badge nested inside one of the two buttons.
+   Nesting it was the page's one surface-inside-a-control: it made "Apple
+   Silicon" visibly wider than its "Intel" peer (the row stopped reading as a
+   pair of equals), and its `--bg-node` fill read LIFTED in light but RECESSED
+   in dark, where `--bg-node` is darker than the button's own `--bg-tertiary`.
+   Out on the card the neutral inset is the right depth in both themes, and the
+   caption can say how to choose instead of just pointing at one button. */
+.oj-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  margin: 0 0 var(--space-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Mono micro, the same voice as the version string: a label ON a value, not
+   prose. Mono is the one face allowed under the 13px sans floor, and it still
+   clears the full 4.5:1 body bar on `--bg-tertiary` in both themes. */
 .oj-chip {
-  font-family: var(--oj-font-body);
-  font-weight: 600;
-  font-size: 0.7rem;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  color: var(--oj-white);
-  background: var(--oj-pine);
-  border-radius: var(--oj-r-pill);
-  padding: 2px 8px;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
   white-space: nowrap;
 }
 
 /* ---- other / all platforms (always visible) ---- */
-.oj-other {
-  border: 2px solid var(--oj-ink);
-  border-radius: var(--oj-r-lg);
-  background: var(--oj-white);
-  box-shadow: var(--oj-shadow-lift);
-  padding: 1.25rem 1.25rem 0.5rem;
-  margin-bottom: 1.5rem;
-}
-
 .oj-other-title {
-  font-family: var(--oj-font-voice);
-  font-weight: 700;
-  font-size: 1.6rem;
-  margin: 0 0 0.5rem;
-  color: var(--oj-ink);
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .oj-other-body {
@@ -286,39 +265,32 @@ body {
 }
 
 .oj-plat {
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--oj-border-subtle);
-  margin-top: 1.25rem;
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
 }
 .oj-plat:first-child {
-  border-top: 0;
-  margin-top: 0.25rem;
+  margin-top: var(--space-xs);
   padding-top: 0;
+  border-top: 0;
 }
 
 .oj-plat-title {
-  font-family: var(--oj-font-body);
-  font-weight: 700;
-  font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--oj-ink-muted);
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.2;
 }
 
-/* In the other-platforms list, buttons are white-on-paper (secondary), so the
-   ink-fill primary is reserved for the detected card. */
+/* In the all-platforms list the buttons are the inset variant (secondary), so
+   the one accent fill on the page stays with the detected card. */
 .oj-other-body .oj-btn {
-  color: var(--oj-ink);
-  background: var(--oj-white);
-  box-shadow: var(--oj-shadow-rest);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 .oj-other-body .oj-btn:hover {
-  background: var(--oj-sand);
-  box-shadow: var(--oj-shadow-lift);
-}
-.oj-other-body .oj-btn:active {
-  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.15);
+  background: color-mix(in oklab, var(--text-primary) 8%, var(--bg-tertiary));
 }
 
 /* A target whose asset regex found nothing is hidden (no dead/disabled button). */
@@ -328,78 +300,81 @@ body {
 }
 
 .oj-latency {
-  font-family: var(--oj-font-body);
-  font-size: 0.9rem;
-  color: var(--oj-ink-soft);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }
 .oj-latency--native {
-  margin: 1.5rem 0 0;
+  margin: var(--space-lg) 0 0;
 }
 
 .oj-versions {
-  font-family: var(--oj-font-body);
-  font-size: 1rem;
-  color: var(--oj-ink-soft);
-  margin: 0 0 1.5rem;
+  margin: 0 0 var(--space-lg);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
 }
 .oj-link--versions {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* ---- links ---- */
 .oj-link {
-  color: var(--oj-blue-out);
+  border-radius: var(--radius-sm);
+  color: var(--accent-ink);
+  font-weight: 600;
   text-decoration: none;
-  font-weight: 500;
 }
 .oj-link:hover {
   text-decoration: underline;
 }
 
+/* The browser CTA is a raised card, not a bordered slab. */
 .oj-browser {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.25rem 0.85rem;
-  border: 2px solid var(--oj-blue);
-  border-radius: var(--oj-r-lg);
-  box-shadow: var(--oj-shadow-lift);
-  background: var(--oj-paper-panel);
-  padding: 1rem 1.25rem;
-  margin: 0 0 2rem;
+  gap: var(--space-xs) var(--space-md);
+  margin: 0 0 var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-node);
+  box-shadow: var(--shadow-raised);
 }
 .oj-link--browser {
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-size: var(--text-lg);
 }
 .oj-latency--browser {
-  color: var(--oj-ink-soft);
+  color: var(--text-secondary);
 }
 
 /* ---- footer ---- */
 .oj-foot {
-  border-top: 1px solid var(--oj-border-subtle);
-  padding-top: 1.25rem;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
 }
 .oj-foot p {
-  font-size: 0.9rem;
-  color: var(--oj-ink-muted);
   margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }
 
-/* ---- focus + motion ---- */
+/* ---- the one focus ring ---- */
 :focus-visible {
-  outline: 2px solid var(--oj-ink);
-  outline-offset: 2px;
-  border-radius: var(--oj-r-sm);
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
 }
 
+/* The blanket reduced-motion rule, carried here because this page loads no
+   global.css (see the file header). No cable and no meter lives on this page,
+   so it needs neither of global.css's two exemptions. */
 @media (prefers-reduced-motion: reduce) {
-  .oj-btn {
-    transition: none;
-  }
-  .oj-btn:hover,
-  .oj-btn:active {
-    transform: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

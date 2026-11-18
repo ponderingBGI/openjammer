@@ -172,7 +172,7 @@ describe('actionRegistry (M2)', () => {
         it('applies an optional substring query over title/group/keywords', () => {
             registerAll([
                 makeAction('looper', { title: 'Add Looper', keywords: ['loop'] }),
-                makeAction('piano', { title: 'Add Piano', group: 'Instruments' }),
+                makeAction('keys', { title: 'Add Keys', group: 'Instruments' }),
             ]);
 
             const result = queryActions(ctx(['global']), {

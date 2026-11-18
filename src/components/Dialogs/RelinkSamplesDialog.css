@@ -27,6 +27,18 @@
 .relink-samples-list {
   max-height: 300px;
   overflow-y: auto;
+  gap: 0;
+}
+
+/* Rows are separated by a hairline rather than a gap: a missing-file list reads
+   as one document you are working down, not a stack of cards. */
+.relink-samples-list .oj-list-row + .oj-list-row {
+  box-shadow: inset 0 1px 0 0 var(--border-subtle);
+}
+
+.relink-samples-list .oj-list-row {
+  cursor: default;
+  padding: var(--space-sm);
 }
 
 .relink-sample-info {
@@ -55,8 +67,18 @@
   text-overflow: ellipsis;
 }
 
+/* Two routes out, given equal weight and a shared edge. They share the row when
+   the sheet is wide enough and each takes the full width when it is not —
+   either way they line up, instead of two differently-sized pills centred one
+   above the other. */
 .relink-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.relink-actions .oj-btn {
+  flex: 1 1 200px;
   justify-content: center;
 }
 
@@ -64,5 +86,5 @@
   display: flex;
   justify-content: flex-end;
   padding: var(--space-md) var(--space-lg);
-  border-top: var(--border-sketch-width) solid var(--sketch-black);
+  border-top: 1px solid var(--border-subtle);
 }

@@ -19,7 +19,8 @@ import { toast } from 'sonner';
 import { useGraphStore } from '../../store/graphStore';
 import { logInfo, logWarn } from '../../utils/log';
 import { WebMarkerStore } from './markerStore';
-import { runRecovery, settle, markCleanExit, markSessionOpen, reset } from './recover';
+import { runRecovery, settle, markCleanExit, markLoadedSnapshot, markSessionOpen, reset } from './recover';
+import { flushEmergencyBackup } from './emergencyFlush';
 import {
     WebPayloadSource,
     validateRecoveredGraph,
@@ -56,6 +57,43 @@ export interface CrashRecoveryApi {
 
 const markerStore = new WebMarkerStore();
 const source = new WebPayloadSource();
+
+/**
+ * The ordinary reopen (U3). `zustand/persist` already brought the CANVAS back by
+ * the time this runs; nothing ever brought the SONG back, because the only
+ * reader of the emergency backup was gated on the previous session having
+ * CRASHED. A clean goodbye therefore deleted the half the player calls "my song"
+ * — with the whole thing sitting on disk, unread (UX-INV Q3, S1 data loss).
+ *
+ * So a clean boot reads the newest NON-QUARANTINED backup and takes exactly one
+ * thing out of it: the arrangement. The rules that make that safe:
+ *   • ONLY the arrangement. The graph is written synchronously on every mutation
+ *     while the backup is debounced 2s, so trusting the backup's graph could
+ *     hand back a canvas older than the one already on screen.
+ *   • SILENTLY. "Recovered your work" belongs to the crash path; saying it on an
+ *     ordinary reopen would teach the player that reopening is an incident.
+ *   • Through `setArrangement`, which CLEARS the command log — never through
+ *     `apply()`, or the player's first Ctrl+Z would delete their song.
+ *   • The quarantine filter stays on (`WebPayloadSource.list()` already drops
+ *     suspects), and the snapshot is pinned to the marker so a crash on it is
+ *     still attributable.
+ *   • The backup is NOT consumed. It is not an incident report, it is the
+ *     document; the next flush overwrites it.
+ */
+function restoreSongOnCleanBoot(): void {
+    const candidate = source.list()[0];
+    if (!candidate) return;
+    let arrangement;
+    try {
+        arrangement = validateRecoveredGraph(candidate.load())?.arrangement ?? null;
+    } catch {
+        return; // A torn blob on a CLEAN boot is not an incident — just open empty.
+    }
+    if (!arrangement) return;
+    useArrangementStore.getState().setArrangement(arrangement);
+    markLoadedSnapshot(markerStore, candidate.id);
+    logInfo('recovery', 'reopened the song from the last backup', { snapshotId: candidate.id });
+}
 
 export function useCrashRecovery(): CrashRecoveryApi {
     const [safeMode, setSafeMode] = useState<SafeModeState | null>(null);
@@ -96,6 +134,8 @@ export function useCrashRecovery(): CrashRecoveryApi {
                 description: 'OpenJammer closed unexpectedly last time. Press Ctrl/Cmd+Z to undo the restore.',
                 duration: 8_000,
             });
+        } else if (outcome.mode === 'clean') {
+            restoreSongOnCleanBoot();
         } else if (outcome.mode === 'safe-mode') {
             logWarn('recovery', 'entered Safe Mode after repeated crashes', {
                 bootSeq: outcome.bootSeq,
@@ -149,7 +189,14 @@ export function useCrashRecovery(): CrashRecoveryApi {
 
     // ---- Clean-exit + bfcache marker lifecycle. ----
     useEffect(() => {
-        const onPageHide = () => markCleanExit(markerStore);
+        // ONE handler, one order: get the document to disk, THEN say we left
+        // cleanly. Two `pagehide` listeners in two files was an ordering by
+        // hook-call accident, and backwards it means the marker promises a
+        // snapshot the flush had not written yet.
+        const onPageHide = () => {
+            flushEmergencyBackup();
+            markCleanExit(markerStore);
+        };
         const onPageShow = (e: PageTransitionEvent) => {
             if (e.persisted) markSessionOpen(markerStore); // resumed from bfcache → re-arm
         };

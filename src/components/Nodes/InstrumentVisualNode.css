@@ -1,234 +1,151 @@
-/**
- * Instrument Visual Node - Compact design with per-key ports
- * Matches mockup: rows of ports with offset numbers below
+/*
+ * InstrumentVisualNode — inside an instrument: one strip per row.
+ *
+ * The file this replaces held 35 literal colours — a fixed cream/ink/blue skin
+ * (paper white, ink near-black, a hard-coded blue and its translucent wash) that stayed
+ * cream in every theme and repainted the socket, the card, the header and the
+ * inline editor by hand (00-design-gap-audit §4). Everything it painted is now
+ * painted once, in oj-ui, by NodeShell / Port / ValueScrubber / Knob. What is
+ * left here is layout: where a row's numbers sit, and how its keys line up.
  */
 
-.instrument-visual-node.compact {
-    position: absolute;
-    background: #fdfbf7;
-    border: 2px solid #2a2a2a;
-    border-radius: 8px;
-    min-width: 200px;
-    font-family: 'Caveat', cursive;
-    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.1);
+.oj-node-frame.iv-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.iv-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
+.instrument-visual-node {
+    min-width: 260px;
+    max-width: 460px;
+}
+
+/* Empty / unreadable. Calm secondary prose, never a warning colour: nothing is
+   broken about an instrument nobody has wired yet. */
+.iv-note {
+    margin: 0;
+    max-width: 34ch;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.iv-rows {
     display: flex;
     flex-direction: column;
+    gap: var(--space-sm);
 }
 
-.instrument-visual-node.compact.selected {
-    border-color: #4a90d9;
-    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.3), 2px 2px 0 rgba(0, 0, 0, 0.1);
-}
-
-.instrument-visual-node.compact.dragging {
-    opacity: 0.8;
-    cursor: grabbing;
-}
-
-/* Compact header */
-.instrument-visual-header.compact {
-    padding: 4px 12px;
-    border-bottom: 2px solid #2a2a2a;
-    cursor: grab;
-    background: #f5f0e6;
-    border-radius: 6px 6px 0 0;
-}
-
-.instrument-visual-header.compact .instrument-visual-title {
-    font-size: 16px;
-    font-weight: bold;
-    color: #2a2a2a;
-}
-
-/* Main rows container */
-.instrument-rows-compact {
-    padding: 8px;
+/* One row = one recessed strip. The inset ground is what makes each row read as
+   a separate channel without a border per side. */
+.iv-row {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-sm);
+    padding: var(--space-sm) 10px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
 }
 
-.no-rows-message.compact {
-    font-size: 14px;
-    color: #888;
-    font-style: italic;
-    text-align: center;
-    padding: 12px;
-}
-
-/* Individual row */
-.row-compact {
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    padding: 6px 8px;
-    background: #fdfbf7;
-}
-
-/* Row header with editable values */
-.row-header-compact {
+.iv-row__head {
     display: flex;
-    gap: 12px;
-    padding-bottom: 6px;
-    border-bottom: 1px dashed #ccc;
-    margin-bottom: 6px;
-    flex-wrap: wrap;
-}
-
-/* Editable value component */
-.editable-value {
-    display: inline-flex;
     align-items: baseline;
-    gap: 4px;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-    transition: background-color 0.15s ease;
-    user-select: none;
+    justify-content: space-between;
+    gap: var(--space-sm);
 }
 
-.editable-value:hover {
-    background: rgba(74, 144, 217, 0.1);
+.iv-row__name {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
 
-.editable-display {
-    font-size: 18px;
-    font-weight: bold;
-    color: #2a2a2a;
-    font-family: 'Caveat', cursive;
-}
-
-.editable-label {
-    font-size: 11px;
-    color: #666;
-    text-transform: lowercase;
-    font-family: 'Inter', -apple-system, sans-serif;
-}
-
-.editable-input {
-    width: 36px;
-    font-size: 14px;
-    padding: 1px 3px;
-    text-align: center;
-    border: 1px solid #4a90d9;
-    border-radius: 3px;
-    outline: none;
-    font-family: 'Caveat', cursive;
-}
-
-.editable-input:focus {
-    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
-}
-
-/* Keys row with ports */
-.row-keys-compact {
-    display: flex;
-    gap: 2px;
-    overflow-x: auto;
-    padding: 4px 0;
-}
-
-/* Individual key column (port + offset label) */
-.key-column {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    min-width: 24px;
-}
-
-/* Key port (circle) - grey styling */
-.key-port {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 2px solid #888;
-    background: #e0e0e0;
-    cursor: pointer;
-    transition: all 0.1s ease;
-}
-
-.key-port:hover {
-    transform: scale(1.2);
-    background: #ccc;
-}
-
-.key-port.connected {
-    background: #888;
-    box-shadow: 0 0 3px #888;
-}
-
-.key-port.pedal {
-    border-color: #666;
-    background: #f0f0f0;
-}
-
-.key-port.pedal:hover {
-    background: #e0e0e0;
-}
-
-/* Offset label below port */
-.key-offset {
-    font-size: 11px;
-    color: #555;
-    font-family: 'Inter', -apple-system, sans-serif;
+/* What this row actually plays, end to end. An exact fact, so mono. */
+.iv-row__span {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
     white-space: nowrap;
 }
 
-/* Pedal row */
-.pedal-row-compact {
-    display: flex;
-    gap: 8px;
-    padding-top: 6px;
-    border-top: 1px dashed #ccc;
-}
-
-.pedal-item {
+.iv-row__tune {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border: 1px solid #888;
-    border-radius: 4px;
-    background: #f5f5f5;
+    justify-content: space-between;
+    gap: var(--space-md);
 }
 
-.pedal-label {
-    font-size: 13px;
-    color: #555;
-    font-family: 'Inter', -apple-system, sans-serif;
+.iv-row__values {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) 10px;
 }
 
-/* Output port area (top right, below header, inside node) */
-.output-port-area {
-    position: absolute;
-    right: 2px;
-    top: 39px;
+/* Micro mono labels beside the value chips — the port-label voice, so a number
+   on a node and a name beside a socket read as one system. */
+.iv-row .oj-value-scrubber__label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* A row of wells, one per key, each under the note it will sound. */
+.iv-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) 6px;
+}
+
+.iv-key {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    gap: 3px;
+    min-width: 26px;
 }
 
-/* Port styles */
-.visual-port {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid #2a2a2a;
-    background: #fdfbf7;
-    cursor: pointer;
-    transition: all 0.15s ease;
+.iv-key__note {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-micro);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    white-space: nowrap;
 }
 
-.visual-port:hover {
-    transform: scale(1.2);
+/* The pedal: a size-1 bundle, so it gets a line of its own rather than a strip. */
+.iv-pedals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
 }
 
-.visual-port.output.audio {
-    border-color: #4a90d9;
-    width: 14px;
-    height: 14px;
+.iv-pedal {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 24px;
 }
 
-.visual-port.output.audio.connected {
-    background: #4a90d9;
+.iv-pedal__label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
 }

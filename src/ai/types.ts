@@ -344,7 +344,7 @@ export interface SettingsPatch {
     outputDeviceId?: string | null;
     /** Selected input device id, or null for the system default. */
     inputDeviceId?: string | null;
-    /** UI theme id (e.g. 'cream' | 'cyberpunk' | 'midnight'). */
+    /** UI theme id ('light' | 'dark'). */
     themeId?: string;
     /** Default note velocity, 0..1. */
     defaultVelocity?: number;

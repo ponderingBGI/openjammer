@@ -1,0 +1,240 @@
+/*
+ * InstrumentNode — the voice, its sockets, the tuning of each row, and the
+ * picker that changes what it sounds like.
+ *
+ * Gone from the split file (W5-S5, formerly SchematicNodes.css L293-599):
+ *  · `@keyframes ghost-fade-in` — defined once, referenced nowhere, in any file
+ *    or component, since before the split (03-canvas-app-reliability-audit, dead
+ *    code table). Deleted, not carried.
+ *  · The bespoke `.instrument-selector-dropdown` grid of `.instrument-card`
+ *    tiles. It is now the shared `Menu`, so the panel, rows, hover fill, category
+ *    headers and focus ring are all defined once in oj-ui.
+ *  · `.instrument-node.hover-connecting`'s accent HALO. Nothing on this canvas
+ *    glows except a cable carrying signal; a drop target says so with its edge.
+ *
+ * `.editable-value` / `.editable-value:hover` stay: `LooperNode` (lane P7) is
+ * still their consumer. When P7 moves the looper onto `ValueScrubber`, delete
+ * the last block in this file with it.
+ */
+
+.oj-node-frame.inst-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.inst-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
+/* The picker is positioned against this, not against the viewport: it is part
+   of the node, so it pans and zooms with the canvas like everything else. */
+.inst-anchor {
+    position: relative;
+}
+
+.instrument-node {
+    min-width: 232px;
+}
+
+/* A cable is in the air and this node is under it. An accent EDGE, no halo. */
+.instrument-node.is-drop-target {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-primary);
+}
+
+/* ============================================
+ * Header — the name is the control
+ * ============================================ */
+
+/* The whole point of this header: press the name, change the voice. So it is a
+   real button, in the tab order, with the one focus ring — not a `div` with a
+   click handler and an underline. */
+.instrument-node .inst-name {
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: color var(--motion-fast);
+}
+
+.instrument-node .inst-name:hover {
+    color: var(--accent-ink);
+}
+
+.instrument-node .inst-name:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* The built-in voice failed to load. Never a toast, never a modal: a held note
+   beats a glitch, so the node keeps playing whatever it has and says this
+   quietly until the player chooses to act. */
+.instrument-node .inst-voice-error {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+    border-radius: 50%;
+    background: color-mix(in oklab, var(--accent-danger) 14%, var(--bg-tertiary));
+    color: var(--danger-ink);
+    font: 700 12px/18px var(--font-sans);
+    text-align: center;
+}
+
+/* ============================================
+ * Body — one line per connected row
+ * ============================================ */
+.inst-empty {
+    margin: 0;
+    max-width: 28ch;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.inst-tune {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.inst-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-sm);
+}
+
+.inst-row + .inst-row {
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+/* The cable's own name, in the micro mono voice port labels use — this row and
+   the socket above it are the same object seen twice. */
+.inst-row__name {
+    flex: 1 1 100%;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.inst-row__pedal {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-secondary);
+}
+
+/* ValueScrubber's label is 13px Outfit by default (it lives in panels). On a
+   node it is a port-sized micro label, so it takes the micro mono voice. */
+.inst-row .oj-value-scrubber__label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* ============================================
+ * Instrument picker
+ * ============================================ */
+.inst-picker {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: var(--z-popover);
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    max-height: 360px;
+    padding: var(--space-sm);
+    gap: var(--space-sm);
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-overlay);
+}
+
+.inst-picker__search {
+    flex: 0 0 auto;
+}
+
+.inst-picker__list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* The Menu is the whole list here, so it drops the panel chrome it would carry
+   as a floating popover — one card, not a card inside a card. */
+.inst-picker__list .oj-menu {
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+}
+
+.inst-picker__empty {
+    margin: 0;
+    padding: var(--space-md) var(--space-sm);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.inst-picker__hint {
+    flex: 0 0 auto;
+    margin: 0;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.inst-item__icon {
+    display: block;
+    width: 18px;
+    height: 18px;
+}
+
+.inst-item__icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* The voice this node is playing right now. Ink and weight, no fill — the fill
+   belongs to hover/focus, which must stay the strongest thing in the list. */
+.inst-item.is-current:not(:hover):not(:focus) .oj-menu-item__label {
+    color: var(--accent-ink);
+    font-weight: 600;
+}
+
+/* ============================================
+ * Inline editable values — LooperNode's, until lane P7 moves it
+ * ============================================ */
+.editable-value {
+    cursor: ns-resize;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+    user-select: none;
+}
+
+.editable-value:hover {
+    background: var(--bg-tertiary);
+}

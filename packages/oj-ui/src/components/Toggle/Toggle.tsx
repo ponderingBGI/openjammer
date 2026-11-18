@@ -6,7 +6,7 @@ export interface ToggleProps {
     checked: boolean;
     /** Fires with the next value when the player flips the switch. */
     onChange: (checked: boolean) => void;
-    /** The switch label (Caveat voice). */
+    /** The switch label. */
     label: ReactNode;
     /** Optional muted line under the label explaining what the switch does. */
     description?: ReactNode;
@@ -17,10 +17,11 @@ export interface ToggleProps {
 }
 
 /**
- * A labeled on/off switch. A real (visually-hidden) checkbox drives a hand-drawn
- * sketch track and knob, so it stays keyboard- and screen-reader-native while
- * looking inked. The knob slides on toggle; nothing reflows on hover or press
- * (No-Surprise §4). Theme-agnostic: styled only via semantic tokens.
+ * A labeled on/off switch. A real (visually-hidden) checkbox drives the pill
+ * track and knob, so it stays keyboard- and screen-reader-native; the focus
+ * ring lands on the track. Checked is the accent fill and the knob springs
+ * across on the one spring curve — nothing reflows on hover or press.
+ * Theme-agnostic: styled only via semantic tokens.
  */
 export function Toggle({ checked, onChange, label, description, disabled = false, id }: ToggleProps) {
     const classes = ['oj-toggle', checked && 'is-checked', disabled && 'is-disabled']

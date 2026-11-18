@@ -21,7 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, PanelHeader, Field, Input, Textarea, CodeBlock, Button } from '@openjammer/oj-ui';
+import { Modal, PanelHeader, Field, Input, Textarea, CodeBlock, Button, Callout, Chip } from '@openjammer/oj-ui';
 import { useLogStore } from '../../store/logStore';
 import { buildIssueReport, gatherDiagnostics } from '../../utils/diagnostics';
 import './IssueReporter.css';
@@ -113,7 +113,12 @@ export function IssueReporter() {
 
     return (
         <Modal open={open} onClose={close} ariaLabel="Report a problem" size="lg">
-            <PanelHeader title="Report a problem" onClose={close} />
+            <PanelHeader
+                title="Report a problem"
+                subtitle="Nothing leaves this device until you press the last button."
+                badge={<Chip tone="success">Local only</Chip>}
+                onClose={close}
+            />
 
             <div className="issue-body">
                 <Field label="Title">
@@ -134,25 +139,25 @@ export function IssueReporter() {
                     />
                 </Field>
 
-                <p className="issue-preview-note">
-                    Preview — <strong>this exact text is what gets posted</strong>. Secrets,
-                    home-directory paths, and LAN addresses are auto-redacted; please review.
+                <Callout variant={report.truncated ? 'warning' : 'info'} title="This exact text is what gets posted">
+                    Secrets, home-directory paths and LAN addresses are auto-redacted — read it
+                    through before you send it.
                     {report.truncated && (
-                        <em>
+                        <>
                             {' '}
-                            The GitHub link carries a shortened log tail — use “Copy diagnostics”
-                            to paste everything.
-                        </em>
+                            The GitHub link carries a shortened log tail; use <strong>Copy
+                            diagnostics</strong> to paste everything.
+                        </>
                     )}
-                </p>
+                </Callout>
 
                 <CodeBlock maxHeight="320px">{report.body}</CodeBlock>
             </div>
 
             <footer className="issue-footer">
-                <Button onClick={copyReport}>{copied ? 'Copied!' : 'Copy diagnostics'}</Button>
+                <Button variant="ghost" onClick={copyReport}>{copied ? 'Copied' : 'Copy diagnostics'}</Button>
                 {canReveal && (
-                    <Button onClick={() => void revealLogFile()}>Reveal log file</Button>
+                    <Button variant="ghost" onClick={() => void revealLogFile()}>Reveal log file</Button>
                 )}
                 <span className="issue-footer__spacer" />
                 <Button variant="primary" onClick={openIssue}>

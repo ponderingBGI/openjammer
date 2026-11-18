@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes } from 'react';
+import type { CSSProperties, InputHTMLAttributes } from 'react';
 import './Slider.css';
 
 export interface SliderProps
@@ -18,12 +18,16 @@ export interface SliderProps
 }
 
 /**
- * The OpenJammer range slider. A token-driven track (`--bg-tertiary` rail,
- * `--sketch-light` fill) with a hand-drawn thumb (`--accent-primary` fill, 2px
- * `--sketch-black` ink border). Stateless: render from `value`, report through
- * `onChange`. No layout shift on interaction (DESIGN.md No-Surprise) — feedback
- * is color and a ≤2px transform only. Theme-agnostic; styled entirely via
- * semantic CSS variables.
+ * The OpenJammer range slider. New DNA: a 6px pill rail (`--bg-tertiary`) with
+ * an `--accent-primary` progress fill and an 18px `--bg-node` thumb ringed in
+ * `--border-control`. A real `<input type="range">`, so keyboard stepping,
+ * `role="slider"` and screen-reader value reporting are native — the e2e suite
+ * and assistive tech both find it by role.
+ *
+ * WebKit has no `::-moz-range-progress`, so the filled portion is painted with
+ * a hard-stop gradient driven by the `--oj-slider-progress` custom property
+ * (0–100) written here. Stateless: render from `value`, report via `onChange`.
+ * Nothing reflows on interaction — the thumb swells, the track does not move.
  */
 export function Slider({
     value,
@@ -32,14 +36,18 @@ export function Slider({
     step = 1,
     onChange,
     className,
+    style,
     ...rest
 }: SliderProps) {
     const classes = ['oj-slider', className].filter(Boolean).join(' ');
+    const span = max - min;
+    const progress = span > 0 ? Math.min(100, Math.max(0, ((value - min) / span) * 100)) : 0;
 
     return (
         <input
             type="range"
             className={classes}
+            style={{ ...style, '--oj-slider-progress': progress } as CSSProperties}
             value={value}
             min={min}
             max={max}

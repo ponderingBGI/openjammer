@@ -5,14 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenJammer</title>
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/outfit-variable.woff2" />
     <style>
       :root {
-        --oj-boot-paper: #f5f0e8;
-        --oj-boot-panel: #ede8e0;
-        --oj-boot-ink: #1a1a1a;
-        --oj-boot-muted: #4a4a4a;
-        --oj-boot-node: #ffffff;
-        --oj-boot-ochre: #c68b3f;
+        --oj-boot-paper: #F4F3F0;
+        --oj-boot-panel: #FAF9F6;
+        --oj-boot-ink: #1D1C18;
+        --oj-boot-muted: #5A5850;
+        --oj-boot-node: #FFFFFF;
+        --oj-boot-accent: oklch(0.66 0.19 40);
+        --oj-boot-line: #E3E1DA;
+        --oj-boot-line-strong: #C8C5BB;
       }
 
       html,
@@ -27,7 +30,7 @@
         overflow: hidden;
         color: var(--oj-boot-ink);
         background: var(--oj-boot-paper);
-        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
       }
 
       #root {
@@ -49,15 +52,15 @@
         width: min(480px, 100%);
         box-sizing: border-box;
         padding: 28px 32px;
-        border: 2px solid var(--oj-boot-ink);
+        border: 1px solid var(--oj-boot-line);
         border-radius: 20px;
         background: var(--oj-boot-node);
-        box-shadow: 2px 2px 0 var(--oj-boot-ink);
+        box-shadow: 0 2px 6px rgba(24,22,16,.07), 0 12px 28px rgba(24,22,16,.11);
       }
 
       .oj-boot-title {
         margin: 0 0 8px;
-        font-family: Caveat, "Comic Sans MS", cursive;
+        font-family: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
         font-size: 36px;
         line-height: 1.1;
       }
@@ -89,9 +92,9 @@
         width: 10px;
         height: 10px;
         flex: 0 0 auto;
-        border: 2px solid var(--oj-boot-ink);
+        border: 1px solid var(--oj-boot-line-strong);
         border-radius: 50%;
-        background: var(--oj-boot-ochre);
+        background: var(--oj-boot-accent);
         animation: oj-boot-pulse 1.2s ease-in-out infinite;
       }
 
@@ -106,7 +109,7 @@
       .oj-boot-hint {
         margin-top: 18px;
         padding-top: 14px;
-        border-top: 2px solid var(--oj-boot-panel);
+        border-top: 1px solid var(--oj-boot-panel);
         color: var(--oj-boot-muted);
         font-size: 13px;
         line-height: 1.45;
@@ -128,17 +131,20 @@
         }
       }
     </style>
+    <script>
+      try{if(localStorage['openjammer-theme']==='dark'){let s=document.documentElement.style;s.setProperty('--oj-boot-paper','#161510');s.setProperty('--oj-boot-panel','#242219');s.setProperty('--oj-boot-ink','#F1EFE8');s.setProperty('--oj-boot-muted','#ABA89C');s.setProperty('--oj-boot-node','#201F19');s.setProperty('--oj-boot-accent','oklch(0.72 0.19 40)');s.setProperty('--oj-boot-line','#33312A');s.setProperty('--oj-boot-line-strong','#4B473D');s.setProperty('--bg-canvas','#161510')}}catch{}
+    </script>
   </head>
   <body>
     <div id="root">
       <main class="oj-boot" role="status" aria-live="polite">
         <section class="oj-boot-card" aria-label="OpenJammer is starting">
           <h1 class="oj-boot-title">OpenJammer</h1>
-          <p class="oj-boot-copy">Warming the sketchbook and connecting the native engine.</p>
+          <p class="oj-boot-copy">Getting the studio ready. Three questions and you&rsquo;ll be playing.</p>
           <ul class="oj-boot-steps" aria-label="Startup checks">
             <li>Loading the canvas</li>
-            <li>Preparing the Rust audio engine</li>
-            <li>Opening the playable window</li>
+            <li>Warming the audio engine</li>
+            <li>Wiring your rig</li>
           </ul>
           <p class="oj-boot-hint">
             If this stays here in dev, check the terminal for the first Vite or Rust error.

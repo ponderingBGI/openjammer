@@ -58,6 +58,10 @@ export type { SliderProps } from './components/Slider/Slider';
 export { Toggle } from './components/Toggle/Toggle';
 export type { ToggleProps } from './components/Toggle/Toggle';
 
+export { Knob } from './components/Knob/Knob';
+export type { KnobProps } from './components/Knob/Knob';
+export { knobNorm, knobValue, knobRotation } from './components/Knob/knobMath';
+
 export { SegmentedControl, Tabs } from './components/SegmentedControl/SegmentedControl';
 export type {
     SegmentedControlProps,
@@ -147,13 +151,26 @@ export { LaneButton } from './components/LaneButton/LaneButton';
 export type { LaneButtonProps, LaneButtonTone } from './components/LaneButton/LaneButton';
 
 export { TimeRuler } from './components/TimeRuler/TimeRuler';
-export type { TimeRulerMark } from './components/TimeRuler/TimeRuler';
+export type { TimeRulerMark, TimeRulerProps } from './components/TimeRuler/TimeRuler';
 
 export { DeviceSelect } from './components/DeviceSelect/DeviceSelect';
 export type { DeviceSelectProps, DeviceSelectItem } from './components/DeviceSelect/DeviceSelect';
 
 export { KeyTile } from './components/KeyTile/KeyTile';
 export type { KeyTileProps, KeyTileVariant } from './components/KeyTile/KeyTile';
+
+export { Meter } from './components/Meter/Meter';
+export type { MeterProps, MeterHandle } from './components/Meter/Meter';
+
+export { TransportPill } from './components/TransportPill/TransportPill';
+export type {
+    TransportPillProps,
+    TransportRecord,
+    TransportPosition,
+    TransportTempo,
+    TransportLoop,
+    TransportMetronome,
+} from './components/TransportPill/TransportPill';
 
 export { Banner } from './components/Banner/Banner';
 export type { BannerProps, BannerTone } from './components/Banner/Banner';

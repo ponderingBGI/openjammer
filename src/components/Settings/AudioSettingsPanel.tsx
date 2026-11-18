@@ -1,12 +1,15 @@
 /**
- * Audio Settings — essentials first, depth on demand.
+ * Settings -> Audio — essentials first, depth on demand.
  *
  * The live latency readout is the hero; the output device and a single clear
  * "Low latency" control are the body; sample rate (auto-synced to the detected
- * device rate when possible), the raw latency hint, and the numeric breakdown live
- * in a collapsed Advanced disclosure. Low latency defaults
- * ON for a USB interface (see useUsbLowLatencyDefault); changes are staged and
- * applied on the player's command so the brief audio restart never ambushes a set.
+ * device rate when possible), the latency hint, the click level and the numeric
+ * breakdown live in a collapsed Advanced disclosure. Low latency defaults ON for
+ * a USB interface (see useUsbLowLatencyDefault); changes are staged and applied
+ * on the player's command so the brief audio restart never ambushes a set.
+ *
+ * Built from the shared `.oj-set-*` row vocabulary (SettingsPanel.css) so this
+ * tab and every other tab speak one form language.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -23,8 +26,10 @@ import {
     Button,
     Callout,
     Chip,
-    IconBolt,
+    DeviceSelect,
+    SegmentedControl,
     Select,
+    Slider,
     Spinner,
     StatusDot,
     Surface,
@@ -86,6 +91,12 @@ function latencyDot(c: LatencyClassification): StatusDotStatus {
 
 const COMMON_SAMPLE_RATES = [44_100, 48_000, 96_000];
 
+const LATENCY_HINTS = [
+    { value: 'interactive', label: 'Interactive' },
+    { value: 'balanced', label: 'Balanced' },
+    { value: 'playback', label: 'Playback' },
+] as const;
+
 function formatSampleRate(rate: number): string {
     const khz = rate / 1000;
     return `${Number.isInteger(khz) ? khz : khz.toFixed(1)} kHz`;
@@ -112,6 +123,7 @@ export function AudioSettingsPanel() {
 
     const [pendingConfig, setPendingConfig] = useState(audioConfig);
     const [isRestarting, setIsRestarting] = useState(false);
+    const [outputPickerOpen, setOutputPickerOpen] = useState(false);
 
     // Native (Tauri) output-device routing (B1). On the native tier the engine —
     // not Web Audio — owns the output stream, so the Speaker node's browser picker
@@ -127,8 +139,6 @@ export function AudioSettingsPanel() {
     const speakerNode = [...nodes.values()].find((n) => n.type === 'speaker');
     const micNode = [...nodes.values()].find((n) => n.type === 'microphone');
     const selectedOutput = (speakerNode?.data as SpeakerNodeData | undefined)?.deviceId ?? 'default';
-    const selectedOutputName = outputDevices.find((d) => d.id === selectedOutput)?.name ?? '';
-    const selectedOutputIsLowLatency = detectLowLatencyDevice(selectedOutputName);
 
     // Low latency guide
     const lowLatencyGuide = useLowLatencyGuide();
@@ -162,6 +172,7 @@ export function AudioSettingsPanel() {
     // the choice on the node so it survives reloads and reconciles with autosave.
     const handleOutputDeviceChange = useCallback(
         (deviceId: string) => {
+            setOutputPickerOpen(false);
             if (!speakerNode) return;
             useGraphStore
                 .getState()
@@ -236,11 +247,23 @@ export function AudioSettingsPanel() {
         measured &&
         (audioMetrics.classification === 'poor' || audioMetrics.classification === 'bad') &&
         !audioConfig.lowLatencyMode;
+    const clickGain = pendingConfig.clickGain ?? 0.2;
+
+    // The device list the native picker shows. "System Default" is always a valid
+    // target, so it heads the list even when enumeration returned nothing.
+    const outputItems = [
+        { id: 'default', label: 'System Default' },
+        ...outputDevices.map((device) => ({
+            id: device.id,
+            label: device.name,
+            lowLatency: detectLowLatencyDevice(device.name),
+        })),
+    ];
 
     return (
-        <div className="oj-aud">
+        <div className="oj-set oj-aud">
             {/* Latency hero — the one lifted surface; reflects real measured metrics. */}
-            <Surface className="oj-aud-hero" elevation="rest" radius="lg" role="status" aria-live="polite">
+            <Surface className="oj-aud-hero" elevation="raised" radius="lg" role="status" aria-live="polite">
                 {measured ? (
                     <div className="oj-aud-hero-main">
                         <div className="oj-aud-hero-state">
@@ -258,6 +281,7 @@ export function AudioSettingsPanel() {
                         <div className="oj-aud-hero-meta">
                             <Chip>{audioMetrics.source === 'native' ? 'Native engine' : 'Browser'}</Chip>
                             <Chip>{(audioMetrics.sampleRate / 1000).toFixed(1)} kHz</Chip>
+                            {deviceInfo.isUSBAudioInterface && <Chip tone="success">USB interface</Chip>}
                         </div>
                     </div>
                 ) : isAudioContextReady ? (
@@ -271,59 +295,51 @@ export function AudioSettingsPanel() {
                             <StatusDot status="idle" />
                             <span className="oj-aud-verdict">Start audio to measure latency</span>
                         </div>
-                        <span className="oj-aud-hero-hint">
-                            Press <strong>Sound live</strong> to begin.
+                        <span className="oj-set-row__desc">
+                            Press play once and the round-trip appears here.
                         </span>
                     </div>
                 )}
             </Surface>
 
             {audioMetrics.isBluetoothSuspected && (
-                <Callout variant="warning" className="oj-aud-callout">
-                    Bluetooth output adds delay — wired headphones or a USB interface play tighter.
+                <Callout variant="warning" title="Bluetooth output adds delay">
+                    Wired headphones or a USB interface play tighter.
                 </Callout>
             )}
 
             {/* Devices + the one clear low-latency control. */}
-            <div className="oj-aud-group">
+            <section className="oj-set-section">
+                <h3 className="oj-set-section__title">Devices</h3>
+
                 {isNative ? (
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Output</span>
-                            <span className="oj-aud-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Output</span>
+                            <span className="oj-set-row__desc">
                                 {speakerNode
                                     ? 'Where the engine sends sound.'
                                     : 'Add a Speaker node to the canvas to choose an output.'}
                             </span>
                         </div>
-                        <div className="oj-aud-control">
-                            {selectedOutputIsLowLatency && (
-                                <IconBolt
-                                    size={14}
-                                    title="Low-latency interface"
-                                    className="oj-aud-bolt"
-                                />
-                            )}
-                            <Select
-                                id="native-output-device"
+                        <div className="oj-set-row__control">
+                            <DeviceSelect
+                                className="oj-aud-device"
+                                ariaLabel="Output device"
+                                items={outputItems}
                                 value={selectedOutput}
+                                open={outputPickerOpen}
                                 disabled={!speakerNode}
-                                onChange={(e) => handleOutputDeviceChange(e.target.value)}
-                            >
-                                <option value="default">System Default</option>
-                                {outputDevices.map((device) => (
-                                    <option key={device.id} value={device.id}>
-                                        {device.name}
-                                    </option>
-                                ))}
-                            </Select>
+                                onToggle={() => setOutputPickerOpen((value) => !value)}
+                                onSelect={handleOutputDeviceChange}
+                            />
                         </div>
                     </div>
                 ) : (
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Output</span>
-                            <span className="oj-aud-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Output</span>
+                            <span className="oj-set-row__desc">
                                 Chosen on the Speaker node on your canvas.
                             </span>
                         </div>
@@ -331,30 +347,27 @@ export function AudioSettingsPanel() {
                 )}
 
                 {isNative && micNode && (
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Microphone</span>
-                            <span className="oj-aud-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Microphone</span>
+                            <span className="oj-set-row__desc">
                                 Capture your mic into the engine. Use headphones to avoid feedback.
                             </span>
                         </div>
-                        <Button variant="secondary" onClick={handleRouteMic}>
-                            Capture mic
-                        </Button>
+                        <div className="oj-set-row__control">
+                            <Button variant="secondary" onClick={handleRouteMic}>
+                                Capture mic
+                            </Button>
+                        </div>
                     </div>
                 )}
+            </section>
+
+            <section className="oj-set-section">
+                <h3 className="oj-set-section__title">Latency</h3>
 
                 <Toggle
-                    label={
-                        <span className="oj-aud-low-label">
-                            Low latency
-                            {deviceInfo.isUSBAudioInterface && (
-                                <Chip tone="success" glyph={<IconBolt size={12} />}>
-                                    USB
-                                </Chip>
-                            )}
-                        </span>
-                    }
+                    label="Low latency"
                     description={
                         deviceInfo.isUSBAudioInterface
                             ? 'On by default for your USB interface — strips mic processing for the tightest timing.'
@@ -363,85 +376,117 @@ export function AudioSettingsPanel() {
                     checked={pendingConfig.lowLatencyMode}
                     onChange={handleLowLatencyChange}
                 />
-            </div>
 
-            {showTips && (
-                <Callout variant="tip" title="How to go faster" className="oj-aud-callout">
-                    <ul className="oj-aud-tips">
-                        <li>Turn on <strong>Low latency</strong> above.</li>
-                        <li>Use wired headphones, not Bluetooth.</li>
-                        <li>Close other apps using audio.</li>
-                        <li>Play through a USB audio interface.</li>
-                    </ul>
-                </Callout>
-            )}
+                {showTips && (
+                    <Callout variant="tip" title="How to go faster">
+                        <ul className="oj-aud-tips">
+                            <li>Turn on <strong>Low latency</strong> above.</li>
+                            <li>Use wired headphones, not Bluetooth.</li>
+                            <li>Close other apps using audio.</li>
+                            <li>Play through a USB audio interface.</li>
+                        </ul>
+                    </Callout>
+                )}
+
+                <div className="oj-set-actions">
+                    <Button variant="secondary" onClick={lowLatencyGuide.open}>
+                        Set up low latency…
+                    </Button>
+                </div>
+            </section>
 
             {/* Advanced — engineer depth, collapsed by default. */}
             <details className="oj-aud-advanced">
                 <summary>Advanced</summary>
                 <div className="oj-aud-advanced-body">
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Sample rate</span>
-                            <span className="oj-aud-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">
+                                Sample rate
+                                {sampleRateIsDetected && <Chip>Detected</Chip>}
+                            </span>
+                            <span className="oj-set-row__desc">
                                 {detectedSampleRate
                                     ? `Detected from the running audio device at ${formatSampleRate(detectedSampleRate)}. Change only if you need another rate.`
                                     : 'Detected when audio starts; higher rates use more CPU.'}
                             </span>
                         </div>
-                        <div className="oj-aud-control">
-                            {sampleRateIsDetected && <Chip>Detected</Chip>}
-                            <Select
-                                value={pendingConfig.sampleRate}
-                                onChange={(e) =>
-                                    setPendingConfig((prev) => ({
-                                        ...prev,
-                                        sampleRate: Number(e.target.value),
-                                    }))
-                                }
-                            >
-                                {sampleRateOptions.map((rate) => (
-                                    <option key={rate} value={rate}>
-                                        {formatSampleRate(rate)}
-                                    </option>
-                                ))}
-                            </Select>
+                        <div className="oj-set-row__control">
+                            {sampleRateOptions.length <= 4 ? (
+                                <SegmentedControl
+                                    aria-label="Sample rate"
+                                    value={String(pendingConfig.sampleRate)}
+                                    options={sampleRateOptions.map((rate) => ({
+                                        value: String(rate),
+                                        label: formatSampleRate(rate),
+                                    }))}
+                                    onChange={(value) =>
+                                        setPendingConfig((prev) => ({ ...prev, sampleRate: Number(value) }))
+                                    }
+                                />
+                            ) : (
+                                <Select
+                                    aria-label="Sample rate"
+                                    value={pendingConfig.sampleRate}
+                                    onChange={(e) =>
+                                        setPendingConfig((prev) => ({
+                                            ...prev,
+                                            sampleRate: Number(e.target.value),
+                                        }))
+                                    }
+                                >
+                                    {sampleRateOptions.map((rate) => (
+                                        <option key={rate} value={rate}>
+                                            {formatSampleRate(rate)}
+                                        </option>
+                                    ))}
+                                </Select>
+                            )}
                         </div>
                     </div>
 
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Latency hint</span>
-                            <span className="oj-aud-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Buffer hint</span>
+                            <span className="oj-set-row__desc">
                                 {pendingConfig.lowLatencyMode
                                     ? 'Low latency overrides this.'
-                                    : 'Interactive is the lowest latency.'}
+                                    : 'Interactive asks the device for the smallest buffer it will give.'}
                             </span>
                         </div>
-                        <Select
-                            value={latencyHintValue}
-                            disabled={pendingConfig.lowLatencyMode}
-                            onChange={(e) =>
-                                setPendingConfig((prev) => ({
-                                    ...prev,
-                                    latencyHint: e.target.value as AudioContextLatencyCategory,
-                                }))
-                            }
-                        >
-                            <option value="interactive">Interactive</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="playback">Playback</option>
-                        </Select>
+                        <div className="oj-set-row__control">
+                            <SegmentedControl
+                                aria-label="Buffer hint"
+                                value={latencyHintValue}
+                                disabled={pendingConfig.lowLatencyMode}
+                                options={LATENCY_HINTS.map((hint) => ({ ...hint }))}
+                                onChange={(value) =>
+                                    setPendingConfig((prev) => ({
+                                        ...prev,
+                                        latencyHint: value as AudioContextLatencyCategory,
+                                    }))
+                                }
+                            />
+                        </div>
                     </div>
 
-                    <div className="oj-aud-row">
-                        <div className="oj-aud-row-text">
-                            <span className="oj-aud-row-label">Click level</span>
-                            <span className="oj-aud-row-desc">Level used by the metronome and count-in.</span>
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Click level</span>
+                            <span className="oj-set-row__desc">Level used by the metronome and count-in.</span>
                         </div>
-                        <div className="oj-aud-control">
-                            <input aria-label="Click gain" type="range" min="0" max="1" step="0.05" value={pendingConfig.clickGain ?? 0.2} onChange={(event) => setPendingConfig((prev) => ({ ...prev, clickGain: Number(event.target.value) }))} />
-                            <output className="oj-aud-bd-val">{Math.round((pendingConfig.clickGain ?? 0.2) * 100)}%</output>
+                        <div className="oj-set-row__control oj-aud-slider">
+                            <Slider
+                                aria-label="Click level"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={clickGain}
+                                onChange={(value) =>
+                                    setPendingConfig((prev) => ({ ...prev, clickGain: value }))
+                                }
+                            />
+                            <output className="oj-set-value">{Math.round(clickGain * 100)}%</output>
                         </div>
                     </div>
 
@@ -449,7 +494,7 @@ export function AudioSettingsPanel() {
                         <div className="oj-aud-breakdown">
                             <div className="oj-aud-bd-row">
                                 <span className="oj-aud-bd-label">Backend</span>
-                                <span className="oj-aud-bd-val">
+                                <span className="oj-set-value">
                                     {audioMetrics.source === 'native'
                                         ? 'Native engine (cpal)'
                                         : 'Browser (AudioContext)'}
@@ -459,13 +504,13 @@ export function AudioSettingsPanel() {
                                 <>
                                     <div className="oj-aud-bd-row">
                                         <span className="oj-aud-bd-label">Browser processing</span>
-                                        <span className="oj-aud-bd-val">
+                                        <span className="oj-set-value">
                                             {audioMetrics.baseLatency.toFixed(1)} ms
                                         </span>
                                     </div>
                                     <div className="oj-aud-bd-row">
                                         <span className="oj-aud-bd-label">Output device</span>
-                                        <span className="oj-aud-bd-val">
+                                        <span className="oj-set-value">
                                             {audioMetrics.outputLatency.toFixed(1)} ms
                                         </span>
                                     </div>
@@ -473,7 +518,7 @@ export function AudioSettingsPanel() {
                             ) : (
                                 <div className="oj-aud-bd-row">
                                     <span className="oj-aud-bd-label">Negotiated buffer</span>
-                                    <span className="oj-aud-bd-val">
+                                    <span className="oj-set-value">
                                         {audioMetrics.bufferFrames != null
                                             ? `${audioMetrics.bufferFrames} frames`
                                             : 'device period'}
@@ -482,7 +527,7 @@ export function AudioSettingsPanel() {
                             )}
                             <div className="oj-aud-bd-row oj-aud-bd-total">
                                 <span className="oj-aud-bd-label">Round-trip</span>
-                                <span className="oj-aud-bd-val">
+                                <span className="oj-set-value">
                                     {audioMetrics.estimatedRoundTrip.toFixed(1)} ms
                                 </span>
                             </div>
@@ -496,23 +541,11 @@ export function AudioSettingsPanel() {
                     variant="primary"
                     className="oj-aud-apply"
                     onClick={handleApplyConfig}
-                    disabled={isRestarting}
+                    loading={isRestarting}
                 >
-                    {isRestarting ? (
-                        <>
-                            <Spinner size={14} /> Restarting…
-                        </>
-                    ) : (
-                        'Apply — restarts audio briefly'
-                    )}
+                    {isRestarting ? 'Restarting…' : 'Apply — restarts audio briefly'}
                 </Button>
             )}
-
-            <div className="oj-aud-foot">
-                <Button variant="link" onClick={lowLatencyGuide.open}>
-                    Set up low latency
-                </Button>
-            </div>
 
             <LowLatencyGuide />
         </div>

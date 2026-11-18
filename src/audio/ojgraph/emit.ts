@@ -122,7 +122,6 @@ const STRUCTURAL_KINDS: ReadonlySet<PrimitiveKind> = new Set<PrimitiveKind>([
  */
 const STRUCTURAL_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
     'keyboard',
-    'keyboard-key',
     'keyboard-visual',
     'instrument-visual',
     'sampler-visual',

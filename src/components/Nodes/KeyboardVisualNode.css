@@ -1,0 +1,133 @@
+/*
+ * KeyboardVisualNode — the playable on-screen keyboard.
+ *
+ * The layout is the argument: three rows of keycaps, each row ENDING in the
+ * socket that carries it. A player who has never read a manual can see that
+ * "these ten keys leave on this cable", because the cable leaves from the end of
+ * the row it belongs to. Nothing here paints a key or a socket — KeyTile and
+ * Port own that; this file only says where the parts sit.
+ *
+ * Replaces the W5-S5 split of the former SchematicNodes.css (L1219-1299): the
+ * `.keyboard-visual-key` repaint (own background, own border, own hover shadow,
+ * a literal translucent press shadow) is gone, because a key that paints itself is a
+ * second key language on the same canvas.
+ */
+
+/* The canvas slot. `NodeFrame` positions; these only order the stack, so a
+   selected or dragged keyboard is not buried under the node beside it. */
+.oj-node-frame.kv-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.kv-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
+/* Rejected gesture (protected delete, failed dive-in) — a two-beat border
+   pulse. Colour, never motion, is the signal; reduced-motion stills it. */
+.oj-node-frame.kv-frame.flashing .oj-node {
+    border-color: var(--accent-warning);
+}
+
+/*
+ * MODE n — this keyboard's number key. It replaces the old 4px green ring and
+ * the floating green dot: in the New DNA green means HEALTHY, never "selected".
+ * Focused mode tints the type chip's ink and its inset; nothing glows.
+ */
+.keyboard-visual-node.is-mode-active .oj-node__type {
+    color: var(--accent-ink);
+    background: color-mix(in oklab, var(--accent-primary) 14%, var(--bg-tertiary));
+}
+
+/* Two columns: the keys, then the bundle socket that closes the row. One grid
+   for all four rows, so every socket lands in the same column no matter how the
+   rows above it are staggered. */
+.kv-grid {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    align-items: center;
+    column-gap: var(--space-md);
+    row-gap: 5px;
+}
+
+.kv-keys {
+    display: flex;
+    gap: 5px;
+}
+
+/* The stagger of a real keyboard — half a key, then a whole one. */
+.kv-keys--2 {
+    margin-left: 21px;
+}
+
+.kv-keys--3 {
+    margin-left: 43px;
+}
+
+.kv-keys--space {
+    margin-left: 64px;
+    margin-top: 3px;
+}
+
+/* Keycaps. The `key` variant is 34x74 by default — three rows of that is a node
+   taller than the canvas, so the faceplate sets its own geometry and hands
+   KeyTile a matching `size` so the reserved socket band scales with it.
+
+   The LETTER is the primary glyph: it is what your finger presses and what the
+   port is named after, so it keeps the handoff's 11px keycap legend at full
+   strength while the size axis shrinks everything else around it. */
+.keyboard-visual-node .keyboard-visual-key {
+    width: 40px;
+    height: 56px;
+    font-size: 11px;
+}
+
+/* `:not(.is-active)` matters: KeyTile's hit state flips the face to the accent
+   and the ink to `--text-on-accent`, and in dark that ink is the DARK one. An
+   unqualified `color` here would repaint a lit key's letter light-on-light
+   (measured 2.36:1). The rest state is the only one this faceplate darkens. */
+.keyboard-visual-node .keyboard-visual-key:not(.is-active) {
+    color: var(--text-primary);
+}
+
+/* The note is a CAPTION, not a chip. The inset pill is the system's voice for a
+   value you can grab; this one is a readout of what the key will sound, so it
+   loses the fill and stays out of the letter's way. */
+.keyboard-visual-node .keyboard-visual-key .oj-key-tile__hint {
+    padding: 0;
+    background: none;
+    font-size: 9px;
+}
+
+/* On the lit face the caption takes the on-accent ink, since the fill under it
+   is now the accent itself rather than the surface chip. */
+.keyboard-visual-node .keyboard-visual-key.is-active .oj-key-tile__hint {
+    background: none;
+    color: var(--text-on-accent);
+}
+
+.keyboard-visual-node .keyboard-visual-key--space {
+    width: 292px;
+}
+
+/* A PLAYABLE keyboard has no per-key port — its keys patch through the ROW
+   socket beside them — so KeyTile's embedded well is rendered without any
+   `data-port-id` and must not be drawn: a well you can aim a cable at that
+   accepts nothing is the exact lie this round removed. The MIRROR inside a
+   `keyboard` container keeps its wells, because there each key really is wired
+   to the container's output panel. Attribute-driven, so the CSS cannot drift
+   from what the node advertises. */
+.keyboard-visual-node .keyboard-visual-key .oj-key-tile__port:not([data-port-id]) {
+    display: none;
+}
+
+/* The bundle socket column. `PortRow` already lays out [label][socket]; this
+   only keeps it hard against the socket column and out of the row-gap. */
+.kv-grid .kv-bundle {
+    justify-self: end;
+}
+
+.kv-grid .kv-bundle--empty {
+    width: var(--port-size);
+    height: var(--port-size);
+}

@@ -1,18 +1,16 @@
 import type { HTMLAttributes, ReactNode } from 'react';
+import { Surface } from '../Surface/Surface';
 import './Callout.css';
 
 export type CalloutVariant = 'info' | 'success' | 'warning' | 'danger' | 'tip';
 
 export interface CalloutProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
     /**
-     * The signal this box carries. The accent shows ONLY on the left border and
-     * the icon (Signal-Not-Brand) — never on the surface or title text:
-     * `info` → neutral ink, `success` → --accent-success,
-     * `warning` → --accent-warning, `danger` → --accent-danger,
-     * `tip` → --accent-secondary. All read theme tokens, never literals.
+     * The signal this box carries. It tints the title and optional icon only;
+     * the body remains neutral for sustained readability.
      */
     variant?: CalloutVariant;
-    /** Optional heading, set in the Caveat voice (Caveat-Is-the-Voice). */
+    /** Optional heading in the functional Outfit face. */
     title?: ReactNode;
     /**
      * A glyph tinted with the variant accent. Pair it with the title/content so
@@ -24,12 +22,8 @@ export interface CalloutProps extends Omit<HTMLAttributes<HTMLDivElement>, 'titl
 }
 
 /**
- * A boxed message. Hard-edged node surface with a 2px ink sketch border; the
- * variant accent appears only on the thick left edge and the icon, so the box
- * reads as a labelled signal rather than a brand-colored panel (DESIGN.md
- * Signal-Not-Brand). Theme-agnostic: styled entirely via semantic CSS
- * variables, so it restyles with the active theme. Replaces GuideInfoBox and
- * the various info/warning banners.
+ * A compact raised message surface. State is carried by the title/icon rather
+ * than a stripe or tinted body, keeping the construction calm and legible.
  */
 export function Callout({
     variant = 'info',
@@ -44,7 +38,7 @@ export function Callout({
         .join(' ');
 
     return (
-        <div className={classes} role="note" {...rest}>
+        <Surface elevation="raised" radius="lg" className={classes} role="note" {...rest}>
             {icon && (
                 <span className="oj-callout__icon" aria-hidden="true">
                     {icon}
@@ -54,6 +48,6 @@ export function Callout({
                 {title && <div className="oj-callout__title">{title}</div>}
                 <div className="oj-callout__content">{children}</div>
             </div>
-        </div>
+        </Surface>
     );
 }

@@ -142,7 +142,7 @@ export function syncPortsWithInternalNodes(
 
         if (childNode.type === 'canvas-input') {
             // Canvas-input creates an input port on parent
-            const portName = (childNode.data.portName as string) || 'Input';
+            const portName = (childNode.data.portName as string) || 'In';
 
             // DETECT port type from internal node's output port
             const internalPort = childNode.ports.find(p => p.direction === 'output');
@@ -156,7 +156,7 @@ export function syncPortsWithInternalNodes(
             });
         } else if (childNode.type === 'canvas-output') {
             // Canvas-output creates an output port on parent
-            const portName = (childNode.data.portName as string) || 'Output';
+            const portName = (childNode.data.portName as string) || 'Out';
 
             // DETECT port type from internal node's input port
             const internalPort = childNode.ports.find(p => p.direction === 'input');
@@ -175,7 +175,7 @@ export function syncPortsWithInternalNodes(
             const inputPorts = childNode.ports.filter(p => p.direction === 'input');
 
             inputPorts.forEach((internalPort) => {
-                const portName = portLabels[internalPort.id] || internalPort.name || 'Output';
+                const portName = portLabels[internalPort.id] || internalPort.name || 'Out';
 
                 // Skip empty ports unless showEmptyOutputs is true
                 if (onlyConnected && !showEmptyOutputs && connections) {
@@ -200,7 +200,7 @@ export function syncPortsWithInternalNodes(
             const outputPorts = childNode.ports.filter(p => p.direction === 'output');
 
             outputPorts.forEach((internalPort) => {
-                const portName = portLabels[internalPort.id] || internalPort.name || 'Input';
+                const portName = portLabels[internalPort.id] || internalPort.name || 'In';
 
                 // Skip empty ports unless showEmptyInputs is true
                 if (onlyConnected && !showEmptyInputs && connections) {
@@ -341,7 +341,7 @@ export function getBundleSizeFromSourcePort(
     // Validate port ID to prevent injection attacks
     if (!isValidCompositePortId(sourcePortId)) {
         console.warn('[portSync] Invalid source port ID rejected:', sourcePortId);
-        return { size: 1, label: 'Input' };
+        return { size: 1, label: 'In' };
     }
 
     // Parse composite port ID: "output-panel-xxx:port-1"
@@ -350,18 +350,18 @@ export function getBundleSizeFromSourcePort(
     const portId = colonIndex !== -1 ? sourcePortId.substring(colonIndex + 1) : null;
 
     const sourceNode = nodes.get(sourceNodeId);
-    if (!sourceNode) return { size: 1, label: 'Input' };
+    if (!sourceNode) return { size: 1, label: 'In' };
 
     // Find the output-panel node
     const panel = nodes.get(panelId);
     if (!panel || panel.type !== 'output-panel') {
         // Not an output-panel, return single connection
-        return { size: 1, label: 'Input' };
+        return { size: 1, label: 'In' };
     }
 
     // Get label from panel's portLabels
     const portLabels = panel.data.portLabels as Record<string, string> | undefined;
-    const label = (portLabels && portId) ? (portLabels[portId] || 'Input') : 'Input';
+    const label = (portLabels && portId) ? (portLabels[portId] || 'In') : 'In';
 
     // Count internal connections TO this panel port
     let size = 0;
@@ -378,10 +378,7 @@ export function getBundleSizeFromSourcePort(
  * Check if a node is an instrument type
  */
 export function isInstrumentNode(node: GraphNode): boolean {
-    const instrumentTypes = [
-        'piano', 'cello', 'electricCello', 'violin', 'saxophone',
-        'strings', 'keys', 'winds', 'instrument', 'sampler'
-    ];
+    const instrumentTypes = ['strings', 'keys', 'winds', 'instrument', 'sampler'];
     return instrumentTypes.includes(node.type);
 }
 

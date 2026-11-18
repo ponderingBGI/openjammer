@@ -1,0 +1,156 @@
+/* SamplerNode — one sample, played chromatically.
+ *
+ * The card is a NodeShell and the slot is an oj-ui `WaveformView` — the SAME
+ * clip card the canvas and the library show, so "this is a piece of audio you
+ * can pick up" is learned once and true everywhere. This file owns the well the
+ * card sits in, the drop states, and the dial grid.
+ *
+ * Rebuilt in W5-P7. */
+
+.oj-node.sampler-node {
+    width: 224px;
+}
+
+.sampler-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+/* ---- The slot ----------------------------------------------------------
+ * Empty, it is a dashed well asking for something. Full, the well GETS OUT OF
+ * THE WAY entirely: `WaveformView` already draws its own 1px `--border-subtle`
+ * edge and `--shadow-raised`, so a border here would sit hard against that one
+ * and read as a 2px line — the doubled hairline the New DNA forbids. One
+ * object, one edge, and it belongs to the clip card. */
+
+.sampler-slot {
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--border-control);
+    background: var(--bg-tertiary);
+    padding: var(--space-sm);
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.sampler-slot.has-sample {
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+/* "Let go here." The app already has one way of saying that — a 1.5px dashed
+   accent edge, drawn as an OUTLINE so the box never resizes under the pointer
+   (`WaveformView.is-drop-target`, `.audio-clip.drop-target`). The slot says it
+   the same way rather than inventing a green of its own; green is machine
+   state, not an invitation. On a FULL slot the clip card draws that edge
+   itself — the app hands `dropTarget` straight to `WaveformView` — so this rule
+   only ever paints the EMPTY well. */
+.sampler-slot:not(.has-sample).is-drop-target {
+    outline: 1.5px dashed var(--accent-primary);
+    outline-offset: -1.5px;
+    border-color: var(--accent-primary);
+    background: color-mix(in oklab, var(--accent-primary) 8%, transparent);
+}
+
+.sampler-slot .sampler-clip {
+    width: 100%;
+    cursor: grab;
+}
+
+/* TRACE BLEED — the flagship object on this card is "the card IS the sample",
+   and a loud, normalised take was drawing as a horizontal RULE hugging the top
+   of the clip card. `oj-ui Waveform` maps a peak of 1.0 to `y = 0`, so a
+   full-scale sample lands exactly on the viewBox edge and reads as a border
+   rather than as audio. The Looper solved the identical problem inside its own
+   inline SVG by widening the viewBox (`TRACE_BLEED = 3`); the shared component
+   cannot be widened from here (another lane's file), so the same 3% of headroom
+   is taken in CSS, off BOTH ends, from this card only. The drawing is unchanged
+   — the mapping, the colours and the peaks are the component's — it simply
+   stops touching the edge. `Waveform.css` sets `overflow: visible` and the
+   stroke is `non-scaling-stroke`, so nothing is clipped either way. */
+.sampler-slot .sampler-clip .oj-waveform-view__trace {
+    transform: scaleY(0.94);
+}
+
+.sampler-slot .sampler-clip:active {
+    cursor: grabbing;
+}
+
+/* ERR-1 — the slot LOOKS loaded but the engine has no PCM. The clip card's OWN
+   edge turns warning and the shape de-saturates, so a broken sample can never
+   be mistaken for a working one — and still only one line is drawn. The
+   sentence beside it is a Callout, not a toast. */
+.oj-node.sampler-node.has-load-error .oj-waveform-view {
+    border-color: var(--accent-warning);
+}
+
+.oj-node.sampler-node.has-load-error .oj-waveform__trace {
+    stroke: var(--text-muted);
+}
+
+.sampler-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) 0;
+}
+
+.sampler-load.oj-btn {
+    width: 100%;
+}
+
+.sampler-empty__hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.sampler-file-input {
+    display: none;
+}
+
+/* ---- The slot's one exact fact ---------------------------------------- */
+
+.sampler-slot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+/* The scroll-capture wrapper: it exists to host the non-passive wheel listener
+   and must not change the scrubber's own box. */
+.sampler-root {
+    display: inline-flex;
+    min-width: 0;
+}
+
+/* ---- The dials --------------------------------------------------------- */
+
+.sampler-dials {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm) var(--space-md);
+    justify-items: center;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.sampler-hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+/* `.node-plugin-error-badge` used to squat here — it is emitted by
+ * `NodeWrapper.tsx`, not by this faceplate, and W5-P7 left a note saying it
+ * belonged in `SchematicBase.css` the next time that file was opened. W6-Z
+ * opened it: the rule now lives beside the rest of the shared node chrome, in
+ * the sheet owned by the component that renders the element. Nothing to do
+ * here. */

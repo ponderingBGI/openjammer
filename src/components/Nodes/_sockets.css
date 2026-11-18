@@ -1,0 +1,46 @@
+/*
+ * Sockets on the schematic faceplates — the ONE place the New DNA socket
+ * language is applied outside the oj-ui Port/PortRow pair.
+ *
+ * Every socket on this canvas is already an oj-ui `<Port>`; the schematic nodes
+ * just hand it a nickname and, historically, a full set of overrides that
+ * repainted it as a coloured disc with a glow. Those overrides are gone. What is
+ * left here is the ONE thing a faceplate still legitimately owns — what a BUNDLE
+ * row looks like — while the well itself (recessed, `--border-control` ring,
+ * muted core until something is plugged in, never a glow) comes from `Port.css`
+ * for every node in the app. One language, defined once, at every size.
+ *
+ * Extracted out of SchematicNodes.css (which lost these rules, it did not gain
+ * a copy) so the socket redesign lives in one readable file instead of eleven
+ * places 3000 lines apart.
+ *
+ * W5-P7b finished the job this file's own comment claimed was done. Four blocks
+ * had no emitter left anywhere in `src/`, `packages/oj-ui/src` or `e2e/` —
+ * `.port-row` (+ its `.input`/`.output` variants), `.port-label`,
+ * `.keyboard-schematic-body` and `.instrument-output-port` — and a fifth, the
+ * forced port size on `.schematic-node .oj-port`, existed only to out-rank an
+ * inline `style` width on a `<Port>`. No `<Port>` in `src/` passes an inline
+ * size any more (verified: `BundlePortGroup`, `InstrumentVisualNode` and
+ * `MiniLab3Visual` are the only three call sites and none of them styles the
+ * socket), and the rule only restated the `var(--port-size)` `Port.css:25-26`
+ * already declares. All five are deleted rather than kept "just in case"
+ * (code value #8).
+ */
+
+/* ============================================================
+ * Bundle socket rows — the label beside the well
+ * ============================================================
+ * Same shape as `.oj-port-row`: socket + 9.5px uppercase mono name, 24px of
+ * hittable row around an 18px well. Emitted by `BundlePortGroup`.
+ */
+.bundle-port-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 24px;
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px var(--space-xs);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+}

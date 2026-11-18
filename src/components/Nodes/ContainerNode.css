@@ -1,0 +1,40 @@
+/* ContainerNode — the "go inside" faceplate.
+ *
+ * A container has no controls, so the card's only job is to be openable. The
+ * ghost button spans the body and carries its own key cap, because the whole
+ * point of this node is that there are two ways in and they are the same door.
+ *
+ * Rebuilt in W5-P6. */
+
+/* Wider than the utility cards: the title is a name the player wrote, and a
+   name that ellipsises at eight characters is not a name. */
+.oj-node.container-node {
+    width: 220px;
+}
+
+/* The renameable title sits in the header, in the header's own voice — the
+   EditableLabel inherits it rather than declaring a second one. */
+.container-title {
+    display: block;
+    min-width: 0;
+}
+
+.container-title .oj-editable-label__text,
+.container-title .oj-input {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.2;
+}
+
+.container-empty {
+    justify-content: center;
+}
+
+/* The door. Full width, so it reads as the card's action rather than a button
+   that happens to be on it. */
+.container-open.oj-btn {
+    justify-content: center;
+    gap: var(--space-sm);
+    width: 100%;
+}

@@ -6,7 +6,7 @@ describe('Kbd', () => {
     it('renders a kbd element with the base class and its children', () => {
         const { container } = render(<Kbd>Esc</Kbd>);
         const kbd = container.querySelector('kbd')!;
-        expect(kbd.className).toBe('oj-kbd');
+        expect(kbd.className).toContain('oj-kbd');
         expect(kbd.textContent).toBe('Esc');
     });
 

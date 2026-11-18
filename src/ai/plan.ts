@@ -8,7 +8,7 @@
  * mis-wires the graph. A {@link WorkflowPlan} lets the agent describe the whole
  * thing at a HIGHER altitude:
  *   - nodes are addressed by a model-chosen symbolic `ref` ("osc1", "out"), and
- *   - wires reference ports by their human NAME ("Audio Out", "Audio In"),
+ *   - wires reference ports by their human NAME ("Out", "In"),
  * exactly as a person reads them off the canvas. This module is the PURE lowering
  * from that plan to the SAME {@link AgentToolCall}s the verbs already apply — so a
  * plan is never a new trust path: it desugars to `add_node` / `add_connection` /
@@ -60,7 +60,9 @@ export interface PlanNode {
 export interface PlanEndpoint {
     /** The {@link PlanNode.ref} this endpoint belongs to. */
     ref: string;
-    /** The port's human NAME (e.g. "Audio Out") — resolved to an id on lowering. */
+    /** The port's human NAME (e.g. "Out") — resolved to an id on lowering.
+     *  The retired spellings (`Audio Out` / `Audio In` / `Output` / `Input`) and the
+     *  port id still resolve, so a plan an agent already learned keeps working. */
     port: string;
 }
 

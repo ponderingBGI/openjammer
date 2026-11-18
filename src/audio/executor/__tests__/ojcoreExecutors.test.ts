@@ -927,3 +927,40 @@ describe('OjcoreNativeExecutor instrument-switch voice binding (mocked Tauri inv
         ex.dispose();
     });
 });
+
+describe('OjcoreWasmExecutor accepted-graph dedupe', () => {
+    it('retries an identical graph after postMessage fails and clears the marker on resync/dispose', () => {
+        const speaker = makeNode('speaker', 'speaker-1');
+        let posts = 0;
+        const postMessage = vi.fn(() => {
+            posts += 1;
+            if (posts === 1) throw new Error('worklet port unavailable');
+        });
+        const executor = new OjcoreWasmExecutor();
+        const internals = executor as unknown as {
+            node: { port: { postMessage: typeof postMessage }; disconnect: () => void } | null;
+            ready: boolean;
+            getNodes: (() => Map<string, GraphNode>) | null;
+            getConnections: (() => Map<string, Connection>) | null;
+            lastPushedGraph: string | null;
+            pushGraph(): void;
+        };
+        internals.node = { port: { postMessage }, disconnect: vi.fn() };
+        internals.ready = true;
+        internals.getNodes = () => new Map([[speaker.id, speaker]]);
+        internals.getConnections = () => new Map();
+
+        internals.pushGraph();
+        expect(postMessage).toHaveBeenCalledTimes(1);
+        expect(internals.lastPushedGraph).toBeNull();
+
+        internals.pushGraph();
+        expect(postMessage).toHaveBeenCalledTimes(2);
+        expect(internals.lastPushedGraph).not.toBeNull();
+
+        executor.resync();
+        expect(postMessage).toHaveBeenCalledTimes(3);
+        executor.dispose();
+        expect(internals.lastPushedGraph).toBeNull();
+    });
+});

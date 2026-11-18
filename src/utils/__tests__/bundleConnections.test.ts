@@ -368,7 +368,7 @@ describe('getBundleSizeFromSourcePort', () => {
 
         const result = getBundleSizeFromSourcePort('source', 'audio-out', nodes, connections);
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 
     it('should detect bundle size from output-panel internal connections', () => {
@@ -418,7 +418,7 @@ describe('getBundleSizeFromSourcePort', () => {
         );
 
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 });
 
@@ -456,7 +456,7 @@ describe('detectBundleInfo', () => {
 // ============================================================================
 
 describe('isInstrumentNode', () => {
-    const instrumentTypes = ['piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds', 'instrument'];
+    const instrumentTypes = ['strings', 'keys', 'winds', 'instrument', 'sampler'];
     const nonInstrumentTypes = ['keyboard', 'microphone', 'output', 'effect', 'looper'];
 
     instrumentTypes.forEach(type => {
@@ -522,10 +522,10 @@ describe('checkDynamicPortAddition', () => {
         const nodes = new Map<string, GraphNode>();
         const connections = new Map<string, Connection>();
 
-        const node = createTestNode({ id: 'piano', type: 'piano' });
-        nodes.set('piano', node);
+        const node = createTestNode({ id: 'inst', type: 'instrument' });
+        nodes.set('inst', node);
 
-        const result = checkDynamicPortAddition('piano', nodes, connections);
+        const result = checkDynamicPortAddition('inst', nodes, connections);
         expect(result.newNode).toBeNull();
         expect(result.updatedNode).toBeNull();
     });
@@ -590,10 +590,10 @@ describe('checkDynamicPortRemoval', () => {
         const nodes = new Map<string, GraphNode>();
         const connections = new Map<string, Connection>();
 
-        const node = createTestNode({ id: 'piano', type: 'piano' });
-        nodes.set('piano', node);
+        const node = createTestNode({ id: 'inst', type: 'instrument' });
+        nodes.set('inst', node);
 
-        const result = checkDynamicPortRemoval('piano', nodes, connections);
+        const result = checkDynamicPortRemoval('inst', nodes, connections);
         expect(result.updatedNode).toBeNull();
     });
 
@@ -660,7 +660,7 @@ describe('Edge Cases', () => {
 
         const result = getBundleSizeFromSourcePort('missing', 'port', nodes, connections);
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 
     it('should handle empty connections map', () => {

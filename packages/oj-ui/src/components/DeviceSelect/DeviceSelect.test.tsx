@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { DeviceSelect, type DeviceSelectItem } from './DeviceSelect';
 
@@ -23,6 +23,7 @@ describe('DeviceSelect', () => {
         expect(container.querySelector('.oj-device-select')).not.toBeNull();
         const trigger = container.querySelector('.oj-device-select__trigger')!;
         expect(trigger.textContent).toContain('Scarlett 2i2');
+        expect(trigger.getAttribute('role')).toBe('combobox');
         expect(trigger.getAttribute('aria-label')).toBe('Microphone');
         expect(trigger.getAttribute('aria-expanded')).toBe('false');
     });
@@ -93,7 +94,101 @@ describe('DeviceSelect', () => {
         // Only the second item (Scarlett 2i2) is low-latency.
         expect(options[0]!.querySelector('.oj-device-select__option-bolt')).toBeNull();
         expect(options[1]!.querySelector('.oj-device-select__option-bolt')).not.toBeNull();
+        expect(options[1]!.textContent).toContain('low latency');
         expect(options[2]!.querySelector('.oj-device-select__option-bolt')).toBeNull();
+    });
+
+    it('uses active-descendant keyboard navigation and selects with Enter', () => {
+        const onSelect = vi.fn();
+        const { container } = render(
+            <DeviceSelect
+                ariaLabel="Microphone"
+                items={ITEMS}
+                value="b"
+                open
+                onToggle={() => {}}
+                onSelect={onSelect}
+            />,
+        );
+        const trigger = container.querySelector('.oj-device-select__trigger')!;
+        fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+        const activeId = trigger.getAttribute('aria-activedescendant')!;
+        expect(container.querySelector(`#${activeId}`)!.textContent).toContain('USB Mic');
+        fireEvent.keyDown(trigger, { key: 'Enter' });
+        expect(onSelect).toHaveBeenCalledWith('c');
+    });
+
+    it('reconciles the active descendant when controlled value or items change', () => {
+        const onSelect = vi.fn();
+        const shared = {
+            ariaLabel: 'Microphone',
+            open: true,
+            onToggle: () => {},
+            onSelect,
+        };
+        const { container, rerender } = render(
+            <DeviceSelect {...shared} items={ITEMS} value="a" />,
+        );
+        const trigger = container.querySelector('.oj-device-select__trigger')!;
+        fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+
+        rerender(<DeviceSelect {...shared} items={ITEMS} value="c" />);
+        expect(container.querySelector(`#${trigger.getAttribute('aria-activedescendant')}`)!.textContent)
+            .toContain('USB Mic');
+        fireEvent.keyDown(trigger, { key: 'Enter' });
+        expect(onSelect).toHaveBeenLastCalledWith('c');
+
+        const reordered = [ITEMS[2]!, ITEMS[0]!];
+        rerender(<DeviceSelect {...shared} items={reordered} value="a" />);
+        expect(container.querySelector(`#${trigger.getAttribute('aria-activedescendant')}`)!.textContent)
+            .toContain('Built-in Microphone');
+        fireEvent.keyDown(trigger, { key: 'Enter' });
+        expect(onSelect).toHaveBeenLastCalledWith('a');
+    });
+
+    it('supports Home, End, Escape and prefix typeahead', () => {
+        const onToggle = vi.fn();
+        const { container } = render(
+            <DeviceSelect
+                ariaLabel="Microphone"
+                items={ITEMS}
+                value="a"
+                open
+                onToggle={onToggle}
+                onSelect={() => {}}
+            />,
+        );
+        const trigger = container.querySelector('.oj-device-select__trigger')!;
+        fireEvent.keyDown(trigger, { key: 'End' });
+        expect(container.querySelector(`#${trigger.getAttribute('aria-activedescendant')}`)!.textContent)
+            .toContain('USB Mic');
+        fireEvent.keyDown(trigger, { key: 'Home' });
+        expect(container.querySelector(`#${trigger.getAttribute('aria-activedescendant')}`)!.textContent)
+            .toContain('Built-in Microphone');
+        fireEvent.keyDown(trigger, { key: 's' });
+        expect(container.querySelector(`#${trigger.getAttribute('aria-activedescendant')}`)!.textContent)
+            .toContain('Scarlett 2i2');
+        fireEvent.keyDown(trigger, { key: 'Escape' });
+        expect(onToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it('forwards disabled to the trigger and blocks toggling', () => {
+        const onToggle = vi.fn();
+        const { container } = render(
+            <DeviceSelect
+                ariaLabel="Microphone"
+                items={ITEMS}
+                value="a"
+                open={false}
+                disabled
+                onToggle={onToggle}
+                onSelect={() => {}}
+            />,
+        );
+        const trigger = container.querySelector('.oj-device-select__trigger') as HTMLButtonElement;
+        expect(trigger.disabled).toBe(true);
+        trigger.click();
+        expect(onToggle).not.toHaveBeenCalled();
     });
 
     it('fires onToggle when the trigger is clicked', () => {
@@ -108,7 +203,7 @@ describe('DeviceSelect', () => {
                 onSelect={() => {}}
             />,
         );
-        (container.querySelector('.oj-device-select__trigger') as HTMLButtonElement).click();
+        fireEvent.click(container.querySelector('.oj-device-select__trigger')!);
         expect(onToggle).toHaveBeenCalledTimes(1);
     });
 
@@ -127,7 +222,7 @@ describe('DeviceSelect', () => {
         const options = container.querySelectorAll<HTMLButtonElement>(
             '.oj-device-select__option',
         );
-        options[2]!.click();
+        fireEvent.click(options[2]!);
         expect(onSelect).toHaveBeenCalledWith('c');
     });
 

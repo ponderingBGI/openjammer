@@ -54,6 +54,31 @@ pub fn scrub_denormals_and_nan(sample: f32) -> f32 {
     sample
 }
 
+/// Flush ONLY a denormal-band value to zero, leaving `NaN`/`Inf` UNTOUCHED.
+///
+/// This is the floor that every *recirculating* filter/delay state needs. A
+/// feedback state that decays multiplicatively (a one-pole, a biquad's `z`
+/// words, a delay's feedback write, a Karplus loop) passes through the subnormal
+/// band on its way to zero and stays there forever. Two things go wrong there:
+/// subnormal arithmetic costs orders of magnitude more CPU on most FPUs, and the
+/// engine's boundary guard ([`ojcore::sanitize`]) has to flush it — which used
+/// to be reported to the player as "this node is sending noise we can't play".
+///
+/// It is deliberately NOT [`scrub_denormals_and_nan`]: a kernel must never
+/// swallow a real `NaN`/`Inf`. Garbage has to survive the kernel and reach the
+/// node boundary so it is *reported*. Denormals are housekeeping; NaN is a
+/// fault. One compare + select per state word, `no_std`, branch-cheap.
+#[inline]
+pub fn flush_denormal(x: f32) -> f32 {
+    // `fabsf(NaN) < FLOOR` and `fabsf(inf) < FLOOR` are both false, so garbage
+    // falls through untouched by construction.
+    if libm::fabsf(x) < DENORMAL_FLOOR {
+        0.0
+    } else {
+        x
+    }
+}
+
 /// A hard peak limiter with a soft (cubic) knee approaching [`LIMITER_CEILING`].
 ///
 /// Inputs within the linear region (|x| <= `knee_start`) pass through untouched.
@@ -217,6 +242,31 @@ mod tests {
     fn scrub_passes_normal_audio_unchanged() {
         for &x in &[0.5_f32, -0.25, 1.0, -1.0, 0.001, 0.0] {
             assert_eq!(scrub_denormals_and_nan(x), x);
+        }
+    }
+
+    #[test]
+    fn flush_denormal_zeroes_the_subnormal_band() {
+        assert_eq!(flush_denormal(1.0e-40), 0.0);
+        assert_eq!(flush_denormal(-1.0e-40), 0.0);
+        assert_eq!(flush_denormal(f32::from_bits(1)), 0.0);
+        // Just under the floor goes; just over it stays.
+        assert_eq!(flush_denormal(1.0e-31), 0.0);
+        assert_eq!(flush_denormal(1.0e-29), 1.0e-29);
+    }
+
+    #[test]
+    fn flush_denormal_passes_garbage_through_to_be_reported() {
+        // The whole point: a kernel floor must NOT swallow a real fault.
+        assert!(flush_denormal(f32::NAN).is_nan());
+        assert_eq!(flush_denormal(f32::INFINITY), f32::INFINITY);
+        assert_eq!(flush_denormal(f32::NEG_INFINITY), f32::NEG_INFINITY);
+    }
+
+    #[test]
+    fn flush_denormal_passes_normal_audio_unchanged() {
+        for &x in &[0.5_f32, -0.25, 1.0, -1.0, 0.001, 0.0] {
+            assert_eq!(flush_denormal(x), x);
         }
     }
 

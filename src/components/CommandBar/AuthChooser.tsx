@@ -25,7 +25,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
-import { Button, Input } from '@openjammer/oj-ui';
+import { Button, Callout, Chip, Field, Input, PanelHeader } from '@openjammer/oj-ui';
 import { useAuthStore } from '../../auth/authStore';
 import { AI_PROVIDERS, providerTitle, type ProviderOption } from '../../auth/providers';
 import { openExternal } from '../../ai/tauri';
@@ -66,16 +66,12 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
 
     return (
         <div className="command-bar-auth" data-testid="auth-chooser">
-            <div className="command-bar-ai-header">
-                <Button
-                    variant="ghost"
-                    onClick={onBack}
-                    aria-label="Back to search"
-                >
-                    ← Search
-                </Button>
-                <span className="command-bar-ai-badge">Configure AI provider</span>
-            </div>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title="Configure AI provider"
+                onBack={onBack}
+                backLabel="Back to search"
+            />
             {configured && activeProvider ? (
                 <div className="command-bar-auth-configured" role="status">
                     <span>Configured: <strong>{providerTitle(activeProvider)}</strong></span>
@@ -119,7 +115,7 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
                             <span className="command-bar-auth-item-title">
                                 {p.title}
                                 {configuredProviders.has(p.id) && (
-                                    <span className="command-bar-auth-configured-mark">configured</span>
+                                    <Chip tone="success">configured</Chip>
                                 )}
                             </span>
                             <span className="command-bar-auth-item-subtitle">
@@ -198,106 +194,109 @@ function ProviderDetail({
 
     return (
         <div className="command-bar-auth" data-testid="auth-detail">
-            <div className="command-bar-ai-header">
-                <Button
-                    variant="ghost"
-                    onClick={onCancel}
-                    aria-label="Back to providers"
-                >
-                    ← Providers
-                </Button>
-                <span className="command-bar-ai-badge">{provider.title}</span>
-            </div>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title={provider.title}
+                onBack={onCancel}
+                backLabel="Back to providers"
+                badge={configured ? <Chip tone="success">configured</Chip> : undefined}
+            />
 
-            {configured && (
-                <p className="command-bar-auth-hint">
-                    {provider.title} is already configured. Press Esc to keep it, or enter a new key to replace it.
-                </p>
-            )}
-
-            {isZen && (
-                <>
-                    <Button
-                        variant="link"
-                        className="command-bar-auth-link"
-                        onClick={() => void openExternal(OPENCODE_AUTH_URL)}
-                    >
-                        Get your free key →
-                    </Button>
-                    {/* NON-DISMISSIBLE data-training notice (free period). */}
-                    <p className="command-bar-auth-notice" role="note">
-                        During its free period, collected data may be used to improve the
-                        model - do not submit personal or confidential data
+            <div className="command-bar-auth-body">
+                {configured && (
+                    <p className="command-bar-auth-hint">
+                        {provider.title} is already configured. Press Esc to keep it, or enter a new key to replace it.
                     </p>
-                </>
-            )}
+                )}
 
-            {provider.id === 'anthropic' && (
-                <p className="command-bar-auth-hint">
-                    API key - billed per token, NOT your Pro/Max plan.
-                </p>
-            )}
+                {isZen && (
+                    <>
+                        {/* NON-DISMISSIBLE data-training notice (free period). */}
+                        <Callout variant="danger" title="Your prompts may train the model">
+                            During its free period, collected data may be used to improve the
+                            model - do not submit personal or confidential data
+                        </Callout>
+                        <Button variant="link" onClick={() => void openExternal(OPENCODE_AUTH_URL)}>
+                            Get your free key →
+                        </Button>
+                    </>
+                )}
 
-            {provider.id === 'openrouter' && (
-                <p className="command-bar-auth-hint">
-                    Paste an OpenRouter key. Then use <code>/models</code> to pick only OpenRouter models.
-                </p>
-            )}
+                {provider.id === 'anthropic' && (
+                    <p className="command-bar-auth-hint">
+                        API key - billed per token, NOT your Pro/Max plan.
+                    </p>
+                )}
 
-            {isOpenAiCompatible && (
-                <p className="command-bar-auth-hint">
-                    Paste a base URL + key. In <code>/models</code>, type a model id and press Enter to add it.
-                </p>
-            )}
+                {provider.id === 'openrouter' && (
+                    <p className="command-bar-auth-hint">
+                        Paste an OpenRouter key. Then use <code>/models</code> to pick only OpenRouter models.
+                    </p>
+                )}
 
-            {isOAuth ? (
-                <Button
-                    variant="primary"
-                    onClick={() => void startOAuth()}
-                    disabled={busy}
-                >
-                    Sign in with Codex
-                </Button>
-            ) : (
-                <>
-                    {isOpenAiCompatible && (
-                        <Input
-                            className="command-bar-auth-input"
-                            placeholder="Base URL (e.g. https://api.example.com/v1)"
-                            value={baseUrl}
-                            onChange={(e) => setBaseUrl(e.target.value)}
-                            disabled={busy}
-                        />
-                    )}
-                    <Input
-                        autoFocus
-                        className="command-bar-auth-input"
-                        type="password"
-                        placeholder="Paste your API key, then press Enter…"
-                        value={key}
-                        onChange={(e) => setKey(e.target.value)}
-                        disabled={busy}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                void submitKey();
-                            } else if (e.key === 'Escape') {
-                                e.preventDefault();
-                                onCancel();
-                            }
-                        }}
-                    />
-                    <Button
-                        variant="primary"
-                        onClick={() => void submitKey()}
-                        disabled={busy || !key.trim()}
-                    >
-                        Save key
-                    </Button>
-                </>
-            )}
+                {isOpenAiCompatible && (
+                    <p className="command-bar-auth-hint">
+                        Paste a base URL + key. In <code>/models</code>, type a model id and press Enter to add it.
+                    </p>
+                )}
 
-            {message && <p className="command-bar-ai-error">{message}</p>}
+                {isOAuth ? (
+                    <div className="command-bar-auth-actions">
+                        <Button variant="primary" onClick={() => void startOAuth()} disabled={busy}>
+                            Sign in with Codex
+                        </Button>
+                    </div>
+                ) : (
+                    <>
+                        {isOpenAiCompatible && (
+                            <Field label="Base URL">
+                                <Input
+                                    mono
+                                    placeholder="https://api.example.com/v1"
+                                    value={baseUrl}
+                                    onChange={(e) => setBaseUrl(e.target.value)}
+                                    disabled={busy}
+                                />
+                            </Field>
+                        )}
+                        <Field
+                            label="API key"
+                            description="Stored in your OS keychain — never written to the project."
+                        >
+                            <Input
+                                mono
+                                autoFocus
+                                type="password"
+                                placeholder="Paste your API key, then press Enter…"
+                                value={key}
+                                onChange={(e) => setKey(e.target.value)}
+                                disabled={busy}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        void submitKey();
+                                    } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        onCancel();
+                                    }
+                                }}
+                            />
+                        </Field>
+                        <div className="command-bar-auth-actions">
+                            <Button
+                                variant="primary"
+                                onClick={() => void submitKey()}
+                                disabled={busy || !key.trim()}
+                                loading={busy}
+                            >
+                                Save key
+                            </Button>
+                        </div>
+                    </>
+                )}
+
+                {message && <p className="command-bar-ai-error">{message}</p>}
+            </div>
         </div>
     );
 }

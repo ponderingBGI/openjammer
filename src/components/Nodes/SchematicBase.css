@@ -1,0 +1,245 @@
+/* SchematicBase — the ONE card language on this canvas.
+ *
+ * `.schematic-node` is a THIN ALIAS of oj-ui's `.oj-node` (master-plan §4.2
+ * step 1): the same surface, the same 1px hairline, the same 14px radius, the
+ * same layered overlay shadow, the same selected / dragging / agent-pending
+ * reads. Every declaration below is the same token and the same number as
+ * `NodeShell.css`, so a faceplate that carries BOTH classes (the ones already
+ * rebuilt on NodeShell) renders identically whichever rule wins the cascade,
+ * and a faceplate that carries only `.schematic-node` (the families still on
+ * their own markup) still reads as the same object.
+ *
+ * The alias adds exactly two things `.oj-node` cannot own: the canvas
+ * POSITIONING (these faceplates are placed with an inline `left/top`), and the
+ * canvas-only feedback states — hover-while-connecting, clip drop target, and
+ * the refusal flash.
+ *
+ * Socket rules live in `_sockets.css`, imported here so one import carries the
+ * whole shared node language. Imported once, first, by `NodeWrapper.tsx`.
+ *
+ * Rebuilt in W5-P6 out of the verbatim SchematicNodes.css split (W5-S5). */
+
+@import './_sockets.css';
+
+/* ============================================
+ * 1. The card — mirror of `.oj-node`
+ * ============================================ */
+.schematic-node {
+    position: absolute;
+    z-index: var(--z-node);
+    min-width: var(--node-min-width);
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-overlay);
+    color: var(--text-primary);
+    overflow: visible;
+    user-select: none;
+    transition: box-shadow var(--motion-fast), border-color var(--motion-fast),
+        opacity var(--motion-fast);
+}
+
+/* Selected — a 1.5px accent edge (1px border + a half-pixel inset) so the card
+   never changes size. Keyboard focus stays a separate, additive read. */
+.schematic-node.selected {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 0.5px var(--accent-primary);
+}
+
+.schematic-node:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-overlay), var(--focus-ring);
+}
+
+.schematic-node.selected:focus-visible {
+    box-shadow: var(--shadow-overlay), inset 0 0 0 0.5px var(--accent-primary),
+        var(--focus-ring);
+}
+
+/* Dragging — one extra shadow layer and a hair of transparency, so the wiring
+   underneath stays readable while the card moves. */
+.schematic-node.dragging {
+    opacity: 0.96;
+    cursor: grabbing;
+    box-shadow: var(--shadow-overlay),
+        0 18px 40px color-mix(in oklab, var(--text-primary) 14%, transparent);
+}
+
+/* ============================================
+ * 2. The header — mirror of `.oj-node__header`
+ * ============================================ */
+.schematic-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 10px 14px;
+    background: var(--bg-node-header);
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    cursor: grab;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--text-lg);
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.schematic-header:active {
+    cursor: grabbing;
+}
+
+/* ============================================
+ * 3. Canvas-only states
+ * ============================================ */
+
+/* A cable is in flight and this card is the drop target. An accent edge, no
+   glow — the loud thing on a canvas is the cable, never the node. */
+.schematic-node.hover-connecting,
+.oj-node.hover-connecting {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-primary);
+}
+
+/* An audio clip is being dragged over this card. */
+.schematic-node.clip-drop-target,
+.oj-node.clip-drop-target {
+    border-color: var(--accent-success);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-success);
+}
+
+/* ---- Refusal feedback (UI-029) ----------------------------------------
+ * `.flashing` (a panel refused an edit) and `.deletion-attempted` (a protected
+ * node refused a delete, or a node that cannot be entered refused `E`) were
+ * emitted by five faceplates with nothing behind them. ONE treatment, here:
+ * a danger edge that is ALREADY in the static state, plus a two-beat pulse on
+ * top.
+ *
+ * `--motion-fast` IS `<duration> <easing>`, so it is passed as the whole timing
+ * and nothing else. Spelling a duration out in front of it would push the
+ * token's own 120ms into the `animation-delay` slot and the pulse would start
+ * late inside the ~400ms the class is on — half the feedback, missed.
+ *
+ * Reduced motion needs no override — `global.css` collapses every animation to
+ * 0.01ms, which leaves exactly the static danger edge for the ~400ms the
+ * uiFeedbackStore keeps the class on. The refusal is still readable, it just
+ * stops moving. The reason is spoken by the `.oj-node__feedback` aria-live
+ * span the faceplates render next to it (colour is never the only carrier). */
+.schematic-node.flashing,
+.schematic-node.deletion-attempted,
+.oj-node.flashing,
+.oj-node.deletion-attempted {
+    border-color: var(--accent-danger);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-danger);
+    animation: oj-node-refuse var(--motion-fast) 2 alternate;
+}
+
+@keyframes oj-node-refuse {
+    from {
+        box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-danger);
+    }
+    to {
+        box-shadow: var(--shadow-overlay), inset 0 0 0 3px var(--accent-danger);
+    }
+}
+
+/* The spoken half of the refusal. Visually hidden; assistive tech announces it
+   the moment the faceplate mounts the text. */
+.oj-node__feedback {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ============================================
+ * 4. Shared body idioms
+ * ============================================
+ * The two shapes every faceplate in this lane reaches for. Both live here
+ * rather than in six family files so a Speaker and a Song space their meta the
+ * same way.
+ */
+
+/* A row of exact, secondary facts under the controls: chips, mono readouts. */
+.oj-node__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+}
+
+/* The degraded-plugin mark, in the header of ANY node type.
+ *
+ * Emitted by `NodeWrapper.tsx` (invariant #4a) when a hosted plugin is missing
+ * or has crashed and the node degraded to a labeled passthrough — a held note
+ * beats a glitch, so the project stays open and this is the only thing that
+ * changes. It lived in `SamplerNode.css` until W6-Z purely by accident of
+ * history; it is shared chrome, so it belongs in the sheet the emitting
+ * component owns.
+ *
+ * The run is the MICRO MONO voice (`--font-mono` + `--text-micro` +
+ * `--tracking-micro` + uppercase) — the same discipline that buys every other
+ * sub-13px label in this app the right to be sub-13px (DESIGN §3; the Menu and
+ * KeyTile precedent). It was `10px var(--font-sans)`: a sans run below the 13px
+ * floor AND a size that is not on the scale at all. The glyph is `!`, so
+ * uppercase is a no-op on it today; the tracking's trailing space was expected
+ * to push it off centre inside the 14px well, and measured 0.00px because the
+ * flex centring absorbs it. The voice is declared where a reader can see it
+ * rather than left to be inherited.
+ *
+ * The INK changed too, because measuring the new run caught what the old one
+ * hid: `--bg-primary` on `--accent-warning` is **2.27:1 in the light theme**
+ * (near-white on amber). `--bg-primary` is the inverse of `--text-primary`, so
+ * it only happens to be dark ink in the DARK theme — in light it was a
+ * near-invisible glyph on the one mark that says "your plugin just died". The
+ * app already has the ink for a solid accent fill and it is theme-invariant by
+ * construction: `--text-on-accent` (#1D1C18), which the Arrangement, the piano
+ * roll and the Library all use for exactly this. Measured after, in Chromium,
+ * on a real degraded node: 6.76 light / 8.38 dark — both clear of the 4.5:1 the
+ * micro voice is still held to.
+ *
+ * The amber FILL is unchanged: the mark reads as a state, not as a control, and
+ * nothing about a crash should be quieter than it is. */
+.node-plugin-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    /* 6px is off the space scale (`--space-xs` is 4px), and it is carried over
+       verbatim: this lane's change is the TYPE run, and moving the badge 2px
+       closer to the title is a visual delta nobody asked for on a surface that
+       only appears when a plugin has crashed. Noted, not fixed. */
+    margin-left: 6px;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-on-accent);
+    background: var(--accent-warning);
+    cursor: help;
+}
+
+/* The mono voice for an exact value a performer reads mid-set. */
+.oj-node__readout {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    line-height: 1.2;
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Settings + About panel styles were relocated to
+   src/components/Settings/SettingsPanel.css (a foreign Settings island removed
+   from this node stylesheet). */

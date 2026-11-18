@@ -1,0 +1,61 @@
+/*
+ * KeyboardNode — the compact keyboard: four socket rows and one line of prose.
+ *
+ * What this file no longer contains is the point of it. The 4px GREEN border and
+ * the 12px green halo that marked the focused keyboard are gone (W4-S4 review
+ * finding #2): in the New DNA green is HEALTHY, and a node cannot be allowed to
+ * borrow a state colour for "selected". The mode now reads as a mono chip in the
+ * header — an exact machine fact, in the voice this system uses for exact facts.
+ * The `.keyboard-octave` chip is gone with it; `NodeShell`'s type chip is the
+ * same object, defined once.
+ */
+
+.oj-node-frame.kb-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.kb-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
+.keyboard-node {
+    min-width: 208px;
+}
+
+/* MODE n — accent ink on an accent-tinted inset when this keyboard has the
+   number keys. A tint, not a ring; nothing on a node glows. */
+.keyboard-node.is-mode-active .oj-node__type {
+    color: var(--accent-ink);
+    background: color-mix(in oklab, var(--accent-primary) 14%, var(--bg-tertiary));
+}
+
+/* A row label is [name][count]: the identity, then how many keys ride the
+   cable. The count is the exact number, so it keeps the mono chip voice while
+   the name stays the micro label PortRow already gives it. */
+.keyboard-node .kb-row-name {
+    white-space: nowrap;
+}
+
+.keyboard-node .kb-row-count {
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* One calm line saying what to do next. Secondary ink, never a callout — the
+   node is an instrument, not a dialog. */
+.keyboard-node .kb-hint {
+    margin: 0;
+    max-width: 30ch;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.keyboard-node .kb-hint.is-sustaining {
+    color: var(--accent-ink);
+}

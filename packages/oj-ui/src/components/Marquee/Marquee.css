@@ -1,13 +1,13 @@
 /*
- * Marquee — the drag-to-select rectangle. 1px dashed accent border over a
- * faint accent fill (color-mixed low, so it tints with the active theme rather
+ * Marquee — the drag-to-select rectangle. A neutral dashed border over a
+ * faint ink wash (color-mixed low, so it follows the active theme rather
  * than a hardcoded color). Absolutely positioned and pointer-events: none, so
  * it draws on top of the canvas without ever intercepting the drag that spawned
  * it. Styled only via semantic tokens. Replaces .selection-box.
  */
 .oj-marquee {
     position: absolute;
-    border: 1px dashed var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+    border: 1px dashed var(--border-strong);
+    background: color-mix(in oklab, var(--text-primary) 6%, transparent);
     pointer-events: none;
 }

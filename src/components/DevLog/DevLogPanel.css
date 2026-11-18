@@ -1,15 +1,21 @@
-/* DevLogPanel (L4) — in-app developer log surface. The overlay chrome (scrim,
-   panel border/shadow, header strip, close), the facet chips, the search field,
-   and the action buttons are all oj-ui primitives (Modal/PanelHeader/Chip/
-   StatusDot/Input/Button), which own their tokens. This file is just the
-   fixed-height panel body, the facets row, the correlation banner, and the
-   windowed log list — the dense mono table the panel exists to render. */
+/*
+ * DevLogPanel (L4) — the in-app developer log.
+ *
+ * Everything with a state (the overlay, the header strip, the filter Chips, the
+ * search Input, the buttons, the level dots, the rows) is an oj-ui part. This
+ * file owns the fixed-height panel body, the facets strip, the correlation
+ * strip, and the dense mono table the panel exists to render — including the
+ * absolute placement the windowing needs.
+ *
+ * Level colour is `*-ink` everywhere, never the raw state hue: this is small
+ * text on a tinted row and it has to hold AA in both themes.
+ */
 
-/* The panel body fills the Modal's lifted Surface as a fixed-height flex column
-   so the windowed list below owns its own scroll (not the whole dialog). The
-   wider-than-`lg` ceiling keeps the dense log table readable. */
+/* The panel body fills the Modal's overlay Surface as a fixed-height flex
+   column so the windowed list below owns its own scroll (not the whole dialog).
+   The wider-than-`lg` ceiling keeps the dense log table readable. */
 .devlog-panel {
-    width: min(960px, calc(100vw - var(--space-lg)));
+    width: min(960px, calc(100vw - 2 * var(--space-lg)));
     height: min(60vh, 640px);
     display: flex;
     flex-direction: column;
@@ -27,6 +33,7 @@
 .devlog-count {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
     color: var(--text-muted);
 }
 
@@ -38,7 +45,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .devlog-chips {
@@ -47,10 +54,22 @@
     gap: var(--space-xs);
 }
 
-/* The facet Chips act as toggle buttons; show a pointer + keep them snug. */
+/* The facet Chips act as toggle buttons; show a pointer, keep them snug, and
+   give them the one focus ring so a keyboard can drive the filters. */
 .devlog-chip {
     cursor: pointer;
     user-select: none;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        box-shadow var(--motion-fast), color var(--motion-fast);
+}
+
+.devlog-chip:hover {
+    border-color: var(--border-strong);
+}
+
+.devlog-chip:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 .devlog-search {
@@ -58,18 +77,18 @@
     min-width: 140px;
 }
 
-/* ── Correlation banner ──────────────────────────────────────────────────── */
+/* ── Correlation strip ───────────────────────────────────────────────────── */
 
 .devlog-corr-banner {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-xs) var(--space-md);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-tertiary);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-primary);
-    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
 }
 
 /* ── Log list (windowed) ─────────────────────────────────────────────────── */
@@ -87,14 +106,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: var(--space-xs);
     color: var(--text-muted);
     padding: var(--space-lg);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
 }
 
-/* The full-height spacer; rows are absolutely placed inside it (windowing). */
+/* The full-height spacer; rows are absolutely placed inside it (windowing), so
+   the List's own column flow and gap are switched off here. */
 .devlog-rows {
+    display: block;
     position: relative;
     width: 100%;
+    gap: 0;
+    overflow: visible;
 }
 
 .devlog-row {
@@ -102,39 +128,53 @@
     left: 0;
     right: 0;
     height: 28px; /* must match ROW_HEIGHT in DevLogPanel.tsx */
+    padding: 0 var(--space-md);
+    border-radius: 0;
+    box-sizing: border-box;
+    white-space: nowrap;
+    cursor: default;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 400;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+/* The row's own body is the column track. */
+.devlog-row .oj-list-row__body {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: 0 var(--space-md);
-    box-sizing: border-box;
-    white-space: nowrap;
-    border-bottom: 1px solid color-mix(in srgb, var(--sketch-black) 8%, transparent);
+    min-width: 0;
 }
 
 .devlog-row[data-clickable='true'] {
     cursor: pointer;
 }
 
-.devlog-row[data-clickable='true']:hover {
-    background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
-}
-
 .devlog-row[data-level='Warn'] {
-    background: color-mix(in srgb, var(--accent-warning) 7%, transparent);
+    background: color-mix(in oklab, var(--accent-warning) 8%, transparent);
 }
 
 .devlog-row[data-level='Error'] {
-    background: color-mix(in srgb, var(--accent-danger) 9%, transparent);
+    background: color-mix(in oklab, var(--accent-danger) 9%, transparent);
+}
+
+.devlog-row[data-level='Warn']:hover,
+.devlog-row[data-level='Error']:hover {
+    background: var(--bg-tertiary);
 }
 
 .devlog-cell-ts {
     color: var(--text-muted);
     flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
 }
 
 .devlog-cell-level {
-    flex: 0 0 52px;
-    font-weight: 700;
+    flex: 0 0 46px;
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
 }
 
 .devlog-cell-level[data-level='Trace'],
@@ -143,15 +183,15 @@
 }
 
 .devlog-cell-level[data-level='Info'] {
-    color: var(--accent-primary);
+    color: var(--audio-ink);
 }
 
 .devlog-cell-level[data-level='Warn'] {
-    color: var(--accent-warning);
+    color: var(--warning-ink);
 }
 
 .devlog-cell-level[data-level='Error'] {
-    color: var(--accent-danger);
+    color: var(--danger-ink);
 }
 
 .devlog-cell-scope {
@@ -166,6 +206,7 @@
     flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: var(--text-primary);
 }
 
 .devlog-cell-fields {
@@ -175,6 +216,6 @@
 
 .devlog-cell-corr {
     flex: 0 0 auto;
-    color: var(--accent-primary);
-    font-weight: 700;
+    font-weight: 600;
+    color: var(--accent-ink);
 }

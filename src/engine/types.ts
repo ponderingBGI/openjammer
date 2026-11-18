@@ -154,7 +154,6 @@ export type UiKind = 'auto' | 'react';
 
 export type NodeType =
     | 'keyboard'
-    | 'keyboard-key'    // Individual keyboard key (signal generator)
     | 'keyboard-visual' // Visual keyboard with per-key outputs (internal node)
     | 'instrument-visual' // Visual instrument with row configuration (internal node)
     | 'microphone'
@@ -162,11 +161,6 @@ export type NodeType =
     | 'midi-visual'     // Visual MIDI device representation (internal node)
     | 'minilab-3'       // Arturia MiniLab 3 with per-control outputs
     | 'minilab3-visual' // Visual MiniLab 3 with per-control outputs (internal node)
-    | 'piano'
-    | 'cello'
-    | 'electricCello'
-    | 'violin'
-    | 'saxophone'
     | 'strings'
     | 'keys'
     | 'winds'
@@ -213,7 +207,6 @@ export type PluginId = NodeType & { readonly __brand: 'PluginId' };
  */
 export const KNOWN_PLUGIN_IDS = [
     'keyboard',
-    'keyboard-key',
     'keyboard-visual',
     'instrument-visual',
     'microphone',
@@ -221,11 +214,6 @@ export const KNOWN_PLUGIN_IDS = [
     'midi-visual',
     'minilab-3',
     'minilab3-visual',
-    'piano',
-    'cello',
-    'electricCello',
-    'violin',
-    'saxophone',
     'strings',
     'keys',
     'winds',
@@ -436,8 +424,19 @@ export interface LibraryNodeData extends NodeData {
     // Volume (0-1)
     volume: number;
 
-    // Missing items detected on load
-    missingItemIds?: string[];
+    // NOTE: there is deliberately no missing-items list here. Which samples are
+    // gone is `LibraryItem.status` in `libraryStore` — written by
+    // `checkMissingItems`, rendered by `LibraryNode`'s struck-through row and
+    // counted by its banner. A copy on `node.data` would be a SECOND record of
+    // one fact, and `node.data` is PERSISTED project state: a `.oj` file would
+    // carry "these were missing last Tuesday on another machine", which is
+    // derived, environment-specific and wrong the moment it is opened
+    // elsewhere. Writing it from the walk would also push a `setNodeData` undo
+    // entry for a filesystem check the player never asked for. Removed in W6-Z
+    // and pinned by `engine/__tests__/libraryNodeData.test.ts`, which also holds
+    // the identifier out of the whole of `src/` — a save that still carries the
+    // key simply keeps it as an unread extra on `data` (neither load path
+    // whitelists node data), so there is no migration to write.
 
     // Tag panel state
     separatorPosition?: number;  // Position of pinned/other tags separator (0-1)

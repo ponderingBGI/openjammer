@@ -4,8 +4,8 @@ import './ProgressBar.css';
 export type ProgressBarTone = 'neutral' | 'success' | 'warning' | 'danger';
 
 export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
-    /** Current progress, clamped to `[0, max]`. */
-    value: number;
+    /** Current progress, clamped to `[0, max]`. Ignored when indeterminate. */
+    value?: number;
     /** Upper bound of `value`. Defaults to `1` (a 0..1 fraction). */
     max?: number;
     /**
@@ -14,20 +14,23 @@ export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
      * (Signal-Not-Brand): the bar is a signal, not a brand flourish.
      */
     tone?: ProgressBarTone;
+    /** Shows a sliding 30% segment when the completion amount is unknown. */
+    indeterminate?: boolean;
     /** Accessible name for the bar (no visible label of its own). */
     'aria-label'?: string;
 }
 
 /**
  * A determinate progress bar. Track is `--bg-tertiary` hairlined with
- * `--sketch-light`; the fill is a solid tone token at `--radius-sm`. Renders as
+ * `--text-muted`; the fill is a solid tone token at `--radius-sm`. Renders as
  * a `role=progressbar` with `aria-valuenow/min/max`, and reads the theme's
  * semantic tokens only — no literal colors, no gradient, no blur.
  */
 export function ProgressBar({
-    value,
+    value = 0,
     max = 1,
     tone = 'neutral',
+    indeterminate = false,
     className,
     style,
     ...rest
@@ -39,6 +42,7 @@ export function ProgressBar({
     const classes = [
         'oj-progress',
         tone !== 'neutral' && `oj-progress--${tone}`,
+        indeterminate && 'is-indeterminate',
         className,
     ]
         .filter(Boolean)
@@ -48,7 +52,7 @@ export function ProgressBar({
         <div
             className={classes}
             role="progressbar"
-            aria-valuenow={clamped}
+            aria-valuenow={indeterminate ? undefined : clamped}
             aria-valuemin={0}
             aria-valuemax={safeMax}
             style={style}
@@ -56,7 +60,7 @@ export function ProgressBar({
         >
             <div
                 className="oj-progress__fill"
-                style={{ width: `${fraction * 100}%` }}
+                style={indeterminate ? undefined : { width: `${fraction * 100}%` }}
             />
         </div>
     );

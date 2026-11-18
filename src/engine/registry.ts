@@ -11,20 +11,30 @@ import { MINILAB3_CONFIG, generatePortsFromConfig } from '../components/controls
 // Port Templates
 // ============================================================================
 
+// Port `position` is normalized against the node's declared `dimensions`.
+// x names the SIDE — 0 = input column, 1 = output column — and
+// `utils/portPositions.socketColumnX` resolves it to the real in-body socket
+// column (14px body padding + 9px socket radius from the card edge), because
+// the New DNA socket is a well sunk INTO the body, not a dot on the edge
+// (master-plan D7). y is measured from the card top; the first socket row sits
+// at `socketRowY(height)` = 60px down (39px header + 12px body padding + 9px
+// radius), each further row 26px below it. Faceplates that place their own
+// sockets (the visual keyboard's keys, MiniLab's knobs) carry real coordinates
+// instead and are left alone.
 const audioOutput: PortDefinition = {
     id: 'audio-out',
-    name: 'Audio Out',
+    name: 'Out',
     type: 'audio',
     direction: 'output',
-    position: { x: 1, y: 0.5 }  // Right side, centered
+    position: { x: 1, y: 0.5 }  // output column; y overridden per node
 };
 
 const audioInput: PortDefinition = {
     id: 'audio-in',
-    name: 'Audio In',
+    name: 'In',
     type: 'audio',
     direction: 'input',
-    position: { x: 0, y: 0.5 }  // Left side, centered
+    position: { x: 0, y: 0.5 }  // input column; y overridden per node
 };
 
 // ============================================================================
@@ -40,8 +50,11 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Virtual keyboard controller (auto-assigned key)',
         ui: 'react', // KeyboardNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
+        // `assignedKey` is deliberately ABSENT: a fixed default would pre-claim
+        // mode 2 for every keyboard. `graphStore.addNode` allocates the lowest
+        // free number ONCE when the node enters the graph and persists it there
+        // (`store/keyboardModes.ts`).
         defaultData: {
-            assignedKey: 2,
             activeRow: null,
             rowOctaves: [4, 4, 4]
         },
@@ -52,73 +65,48 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
 
-    'keyboard-key': {
-        type: 'keyboard-key',
-        category: 'input',
-        name: 'Key',
-        description: 'Individual keyboard key signal generator',
-        ui: 'auto', // no bespoke NodeWrapper branch -> AutoParamPanel
-        defaultPorts: [
-            {
-                id: 'out',
-                name: 'Out',
-                type: 'control',
-                direction: 'output',
-                position: { x: 1, y: 0.5 }
-            }
-        ],
-        defaultData: {
-            keyLabel: 'Q',
-            row: 1,
-            keyIndex: 0
-        },
-        dimensions: { width: 50, height: 50 }
-    },
-
     'keyboard-visual': {
         type: 'keyboard-visual',
         category: 'input',
-        name: 'Keyboard',
-        description: 'Visual keyboard with per-key outputs',
+        // Distinct from the `keys` INSTRUMENT (also named 'Keys') — two menu rows
+        // reading "Add Keys" would be a coin toss in the palette.
+        name: 'On-Screen Keys',
+        description: 'Playable on-screen keyboard — click a key or type Q-P / A-L / Z-/',
         ui: 'react', // KeyboardVisualNode (schematic switch)
         defaultPorts: [
-            // Row 1 (Q-P): 10 keys - ports on right edge, y: 0.05-0.22
-            { id: 'key-q', name: 'Q', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
-            { id: 'key-w', name: 'W', type: 'control', direction: 'output', position: { x: 1, y: 0.07 } },
-            { id: 'key-e', name: 'E', type: 'control', direction: 'output', position: { x: 1, y: 0.09 } },
-            { id: 'key-r', name: 'R', type: 'control', direction: 'output', position: { x: 1, y: 0.11 } },
-            { id: 'key-t', name: 'T', type: 'control', direction: 'output', position: { x: 1, y: 0.13 } },
-            { id: 'key-y', name: 'Y', type: 'control', direction: 'output', position: { x: 1, y: 0.15 } },
-            { id: 'key-u', name: 'U', type: 'control', direction: 'output', position: { x: 1, y: 0.17 } },
-            { id: 'key-i', name: 'I', type: 'control', direction: 'output', position: { x: 1, y: 0.19 } },
-            { id: 'key-o', name: 'O', type: 'control', direction: 'output', position: { x: 1, y: 0.21 } },
-            { id: 'key-p', name: 'P', type: 'control', direction: 'output', position: { x: 1, y: 0.23 } },
-            // Row 2 (A-L): 9 keys - y: 0.30-0.46
-            { id: 'key-a', name: 'A', type: 'control', direction: 'output', position: { x: 1, y: 0.30 } },
-            { id: 'key-s', name: 'S', type: 'control', direction: 'output', position: { x: 1, y: 0.32 } },
-            { id: 'key-d', name: 'D', type: 'control', direction: 'output', position: { x: 1, y: 0.34 } },
-            { id: 'key-f', name: 'F', type: 'control', direction: 'output', position: { x: 1, y: 0.36 } },
-            { id: 'key-g', name: 'G', type: 'control', direction: 'output', position: { x: 1, y: 0.38 } },
-            { id: 'key-h', name: 'H', type: 'control', direction: 'output', position: { x: 1, y: 0.40 } },
-            { id: 'key-j', name: 'J', type: 'control', direction: 'output', position: { x: 1, y: 0.42 } },
-            { id: 'key-k', name: 'K', type: 'control', direction: 'output', position: { x: 1, y: 0.44 } },
-            { id: 'key-l', name: 'L', type: 'control', direction: 'output', position: { x: 1, y: 0.46 } },
-            // Row 3 (Z-/): 10 keys - y: 0.53-0.71
-            { id: 'key-z', name: 'Z', type: 'control', direction: 'output', position: { x: 1, y: 0.53 } },
-            { id: 'key-x', name: 'X', type: 'control', direction: 'output', position: { x: 1, y: 0.55 } },
-            { id: 'key-c', name: 'C', type: 'control', direction: 'output', position: { x: 1, y: 0.57 } },
-            { id: 'key-v', name: 'V', type: 'control', direction: 'output', position: { x: 1, y: 0.59 } },
-            { id: 'key-b', name: 'B', type: 'control', direction: 'output', position: { x: 1, y: 0.61 } },
-            { id: 'key-n', name: 'N', type: 'control', direction: 'output', position: { x: 1, y: 0.63 } },
-            { id: 'key-m', name: 'M', type: 'control', direction: 'output', position: { x: 1, y: 0.65 } },
-            { id: 'key-comma', name: ',', type: 'control', direction: 'output', position: { x: 1, y: 0.67 } },
-            { id: 'key-period', name: '.', type: 'control', direction: 'output', position: { x: 1, y: 0.69 } },
-            { id: 'key-slash', name: '/', type: 'control', direction: 'output', position: { x: 1, y: 0.71 } },
-            // Spacebar - y: 0.85
-            { id: 'key-space', name: 'Space', type: 'control', direction: 'output', position: { x: 1, y: 0.85 } }
+            // The three ROW bundles + the PEDAL — and nothing else. These are what
+            // a rig plugs into an instrument: `resolveKeyboardNotes` /
+            // `connectionActivity` resolve a keyboard's source port for row N by
+            // NAME ("Row N"), and the pedal by the id `pedal`.
+            //
+            // There is deliberately NO port per key. This node used to advertise
+            // 31 of them; a cable from one connected, drew a socket row on the
+            // instrument and then routed nothing at all, because no note path in
+            // the app resolves a per-key port. Thirty wells that lie are worse
+            // than no wells. The MIRROR inside a `keyboard` container is the
+            // exception and keeps its per-key ports — there they are really wired
+            // to the container's output panel (`nodeInternals.createKeyboardInternals`).
+            { id: 'row-1', name: 'Row 1', type: 'control', direction: 'output', position: { x: 1, y: 0.22 } },
+            { id: 'row-2', name: 'Row 2', type: 'control', direction: 'output', position: { x: 1, y: 0.45 } },
+            { id: 'row-3', name: 'Row 3', type: 'control', direction: 'output', position: { x: 1, y: 0.68 } },
+            { id: 'pedal', name: 'Pedal', type: 'control', direction: 'output', position: { x: 1, y: 0.88 } }
         ],
-        defaultData: {},
-        dimensions: { width: 660, height: 280 }
+        // A playable keyboard, not a mirror: `rowOctaves` is the octave each row
+        // sounds at when no instrument row overrides it, exactly as on `keyboard`.
+        // `assignedKey` is deliberately ABSENT — a fixed default would give every
+        // visual keyboard mode 2. `graphStore.addNode` allocates the lowest free
+        // number once and persists it, under the same law as `keyboard`
+        // (`store/keyboardModes.ts`).
+        defaultData: {
+            activeRow: null,
+            // Three rows, three octaves — the top QWERTY row is the high one, the
+            // way a two-manual split reads. `keyboard` keeps [4,4,4] because its
+            // rows are re-tuned per instrument ROW once a bundle lands; a leaf
+            // visual keyboard has no row to re-tune, so its default has to be
+            // musical on its own.
+            rowOctaves: [5, 4, 3]
+        },
+        dimensions: { width: 580, height: 320 }
     },
 
     'instrument-visual': {
@@ -131,7 +119,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
             // Input ports on left (connected from input-panel rows)
             { id: 'row-in', name: 'Rows', type: 'control', direction: 'input', position: { x: 0, y: 0.5 } },
             // Audio output on right (connects to output-panel)
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         defaultData: {},
         dimensions: { width: 500, height: 300 },
@@ -156,7 +144,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
     midi: {
         type: 'midi',
         category: 'input',
-        name: 'Midi',
+        name: 'MIDI',
         description: 'Connect MIDI controllers (keyboards, pads, knobs)',
         ui: 'react', // MIDINode (schematic switch)
         defaultPorts: [
@@ -295,105 +283,12 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         canEnter: false  // Cannot enter this internal visual node
     },
 
-    // Instruments - all share similar layout: inputs on left, audio out on right
-    piano: {
-        type: 'piano',
-        category: 'instruments',
-        name: 'Classic Piano',
-        description: 'Grand piano instrument',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 0 },
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }  // Audio out centered
-        }
-    },
-
-    cello: {
-        type: 'cello',
-        category: 'instruments',
-        name: 'Cello',
-        description: 'Orchestral cello',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': -12 }, // Default octaves lower
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    electricCello: {
-        type: 'electricCello',
-        category: 'instruments',
-        name: 'Electric Cello',
-        description: 'Modern electric cello with saturation and chorus',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': -12 }, // Same range as acoustic cello
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    violin: {
-        type: 'violin',
-        category: 'instruments',
-        name: 'Violin',
-        description: 'Orchestral violin',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 12 }, // Higher pitch
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    saxophone: {
-        type: 'saxophone',
-        category: 'instruments',
-        name: 'Saxophone',
-        description: 'Jazz saxophone',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 0 },
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    // Category Aliases / Defaults - inherit layout from their base type
+    // Instrument FAMILIES — the three rows the Instruments menu offers and the
+    // three Ctrl+<-/-> cycles through. Each is the generic sampled instrument
+    // pre-tuned to a family (octave offset + the picker categories it browses);
+    // `instrument` below is the same node with the whole catalogue open.
     strings: {
-        type: 'strings', // Category alias for string instruments (defaults to cello sampler)
+        type: 'strings', // String family: browses the strings/bass catalogue
         category: 'instruments',
         name: 'Strings',
         description: 'String Ensemble',
@@ -401,7 +296,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': -12 },
@@ -415,7 +310,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
     keys: {
-        type: 'keys', // Category alias for keyboard instruments (defaults to piano sampler)
+        type: 'keys', // Keyboard family: browses the piano catalogue
         category: 'instruments',
         name: 'Keys',
         description: 'Keyboards',
@@ -423,7 +318,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -437,7 +332,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
     winds: {
-        type: 'winds', // Category alias for wind instruments (defaults to saxophone sampler)
+        type: 'winds', // Wind family: browses the woodwind/brass/world catalogue
         category: 'instruments',
         name: 'Winds',
         description: 'Wind Instruments',
@@ -445,7 +340,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -465,15 +360,19 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Instrument',
         description: 'Generic sampled instrument',
-        // NodeWrapper has NO bespoke branch for 'instrument' (it is NOT in
-        // SCHEMATIC_TYPES nor a renderNodeContent case) — it falls through to the
-        // FREE AutoParamPanel. The old REACT_UI listed it as react, which was the
-        // single mis-declaration; reality is 'auto'.
-        ui: 'auto',
+        // InstrumentNode (schematic switch). `instrument` used to fall through to
+        // the free AutoParamPanel and this said `'auto'`; the previous commit put
+        // it in NodeWrapper's SCHEMATIC_TYPES and gave it the same
+        // `case 'instrument':` branch as the family aliases — the generic voice
+        // every preset rig installs was rendering as an anonymous card with no
+        // voice picker. `ui` is what the plugin manifest advertises, so leaving
+        // it at 'auto' made the manifest describe a faceplate that is not there
+        // (the `node-registry` doctor gate fails on exactly that mismatch).
+        ui: 'react',
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -510,8 +409,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Audio effect processor',
         ui: 'react', // EffectNode (renderNodeContent switch)
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 100px card height.
+            { ...audioInput, position: { x: 0, y: 0.6 } },
+            { ...audioOutput, position: { x: 1, y: 0.6 } }
         ],
         defaultData: {
             effectType: 'distortion',
@@ -527,8 +427,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Place a mono signal in the stereo field (−1 left … +1 right)',
         ui: 'auto', // AutoParamPanel (one pan knob) — no bespoke NodeWrapper branch
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 90px card height.
+            { ...audioInput, position: { x: 0, y: 0.667 } },
+            { ...audioOutput, position: { x: 1, y: 0.667 } }
         ],
         defaultData: {
             pan: 0
@@ -543,8 +444,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Stereo width via mid/side (0 = mono … 1 = unchanged … 2 = wide)',
         ui: 'auto', // AutoParamPanel (one width knob) — no bespoke NodeWrapper branch
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 90px card height.
+            { ...audioInput, position: { x: 0, y: 0.667 } },
+            { ...audioOutput, position: { x: 1, y: 0.667 } }
         ],
         defaultData: {
             width: 1
@@ -563,9 +465,10 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Multiply a signal by a number, or by a second signal (×)',
         ui: 'react', // MultiplierNode (renderNodeContent switch)
         defaultPorts: [
-            { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
-            { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
-            { id: 'out', name: 'Out', type: 'universal', direction: 'output', position: { x: 1, y: 0.5 } }
+            // Socket rows 0 and 1: 60 / 86 over a 100px card height.
+            { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.6 } },
+            { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.86 } },
+            { id: 'out', name: 'Out', type: 'universal', direction: 'output', position: { x: 1, y: 0.6 } }
         ],
         defaultData: {
             factor: 1,
@@ -600,6 +503,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Record audio to WAV file',
         ui: 'react', // RecorderNode (renderNodeContent switch)
         defaultPorts: [
+            // First body socket row: 60 / 120px card height.
             { ...audioInput, position: { x: 0, y: 0.5 } }
         ],
         defaultData: {
@@ -751,7 +655,6 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
             itemRefs: [],
             playbackMode: 'oneshot',
             volume: 1,
-            missingItemIds: [],
             // Tag panel state
             separatorPosition: 0.5,  // Position of pinned/other tags separator (0-1)
             // Node resizing
@@ -848,11 +751,29 @@ export interface MenuCategory {
     items: NodeType[];
 }
 
+/**
+ * The ONE list of node types a user can add — and the only one.
+ *
+ * Both add-a-node surfaces read it: the Ctrl+K palette mints one
+ * `node.add.<type>` Action per item (`CommandBar/useCommandSources.ts`
+ * `buildNodeActions`) and the canvas right-click menu RENDERS those same
+ * Actions, grouped by `def.category` (`Canvas/ContextMenu.tsx`). The in-app
+ * agent's vocabulary comes from here too (`ai/graphAdapter.ts`). So a
+ * registered type that appears in no bucket is shipped DSP nobody — no player,
+ * no agent — can ever place: that is exactly what happened to `pan` and
+ * `width`, two real stereo stages the rigs already install.
+ *
+ * Two rules keep it honest, both pinned by `__tests__/menuCategories.test.ts`:
+ * every registered type is either in a bucket or in that test's documented
+ * `INTERNAL_ONLY` list with a reason, and a type's bucket must match the
+ * `category` it declares (the palette groups by `category`, the menu orders by
+ * bucket name — when they disagree one node lands in two different places).
+ */
 export const menuCategories: MenuCategory[] = [
     {
         name: 'Input',
         icon: '⌨️',
-        items: ['keyboard', 'midi', 'microphone', 'library']
+        items: ['keyboard-visual', 'keyboard', 'midi', 'microphone', 'library']
     },
     {
         name: 'Instruments',
@@ -865,9 +786,12 @@ export const menuCategories: MenuCategory[] = [
         items: ['looper']
     },
     {
+        // `pan` and `width` render through the free AutoParamPanel
+        // (`ui: 'auto'`), so they needed no surface of their own — only a
+        // bucket, which is precisely why they were missed.
         name: 'Effects',
         icon: '✨',
-        items: ['effect']
+        items: ['effect', 'pan', 'width']
     },
     {
         name: 'Utility',

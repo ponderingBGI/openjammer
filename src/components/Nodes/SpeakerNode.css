@@ -1,0 +1,77 @@
+/* SpeakerNode — the master-output faceplate.
+ *
+ * The handoff's "Output" card, rebuilt on the shared parts: a LEVEL Knob beside
+ * a tall Meter with one exact dB number under it, then the route (DeviceSelect
+ * + mute) under a hairline. Nothing here paints a control by hand — the dial,
+ * the meter, the picker and the chip are oj-ui; this file only decides the
+ * geometry of the face.
+ *
+ * Rebuilt in W5-P6. */
+
+.oj-node.speaker-node {
+    width: 232px;
+}
+
+/* ---- The instrument half ------------------------------------------------
+ * Dial left, meter right, baselines aligned on the label row so the knob's
+ * caption and the dB readout sit on the same line. */
+.speaker-stage {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding-top: 2px;
+}
+
+.speaker-readout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    min-width: 92px;
+}
+
+/* The one number on this card. Tabular so the digits do not dance while the
+   level moves, and wide enough that `-118.0 dB` never reflows the face. */
+.speaker-db {
+    min-width: 74px;
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* ---- The route half -----------------------------------------------------
+ * Under a hairline, because a device choice is a FACT about where the sound
+ * goes, not part of the instrument you play. */
+.speaker-route {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.speaker-route__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.speaker-route__row .oj-device-select {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Mute keeps the picker's height so the row reads as one control strip. The
+   pressed state is the danger tint — a muted speaker is a state you must be
+   able to spot from across a stage. */
+.speaker-mute.oj-icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+}
+
+.speaker-mute.oj-icon-btn[aria-pressed='true'] {
+    background: color-mix(in oklab, var(--accent-danger) 12%, var(--bg-tertiary));
+    color: var(--danger-ink);
+}

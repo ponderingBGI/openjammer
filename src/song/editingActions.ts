@@ -40,7 +40,7 @@ export function cutSelection(surface?: SurfaceId): boolean {
     if (!copySelection(surface)) return false;
     const verbs = removalVerbs(surface);
     if (!verbs.length) return false;
-    useArrangementStore.getState().apply(verbs);
+    useArrangementStore.getState().apply(verbs, { surface: activeSurface(surface) });
     useEditingContextStore.getState().clearSelection(activeSurface(surface));
     useEditingContextStore.getState().beginSelectionOpHistory(activeSurface(surface));
     return true;
@@ -50,7 +50,7 @@ export function cutSelection(surface?: SurfaceId): boolean {
 export function deleteSelection(surface?: SurfaceId): boolean {
     const verbs = removalVerbs(surface);
     if (!verbs.length) return false;
-    useArrangementStore.getState().apply(verbs);
+    useArrangementStore.getState().apply(verbs, { surface: activeSurface(surface) });
     useEditingContextStore.getState().clearSelection(activeSurface(surface));
     useEditingContextStore.getState().beginSelectionOpHistory(activeSurface(surface));
     return true;

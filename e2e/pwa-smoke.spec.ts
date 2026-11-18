@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { assertAudiblePeak, decodeWav } from './helpers/audio';
+import { bootApp, tabToOtherSurface } from './journeys/support';
 
 // Render-smoke for the browser PWA target (plan §4.2 / §3). Proves the production
 // bundle loads, comes up cross-origin isolated (so the SharedArrayBuffer fast
@@ -60,11 +61,11 @@ test.describe('PWA shell', () => {
         expect(hasSab, 'SharedArrayBuffer must be constructible under isolation').toBe(true);
 
         // Render-smoke: the shell put real content in #root (not a blank page),
-        // and the browser welcome screen's primary CTA is visible. This catches
+        // and the first-run overlay's escape hatch is visible. This catches
         // production bundle TDZ/circular-import crashes where #root stays empty white.
         await expect(page.locator('#root')).not.toBeEmpty();
         await expect(
-            page.getByRole('button', { name: /play here in your browser/i })
+            page.getByRole('button', { name: /skip, take me in/i })
         ).toBeVisible();
         expect(pageErrors, 'no uncaught startup exceptions').toEqual([]);
     });
@@ -151,9 +152,10 @@ test.describe('PWA shell', () => {
         );
         test.skip(!hasWebAudio, 'browser has no Web Audio API (Playwright WebKit)');
 
-        // Click the browser-tier CTA: this resumes the AudioContext and spins up
-        // the OjcoreWasmExecutor → addModule → new AudioWorkletNode → worklet init.
-        await page.getByRole('button', { name: /play here in your browser/i }).click();
+        // Finish the first run: the skip button IS the autoplay gesture, so this
+        // resumes the AudioContext and spins up the OjcoreWasmExecutor →
+        // addModule → new AudioWorkletNode → worklet init.
+        await page.getByRole('button', { name: /skip, take me in/i }).click();
 
         // The worklet must report `ready` (audio engine alive). Before the fix this
         // never happened: the node construction threw InvalidStateError. Generous
@@ -206,9 +208,8 @@ test.describe('PWA shell', () => {
 
     test('browser export downloads a valid 24-bit WAV blob', async ({ page }) => {
         test.setTimeout(90_000);
-        await page.goto('/');
-        await page.getByRole('button', { name: /play here in your browser/i }).click();
-        await page.keyboard.press('Tab');
+        await bootApp(page);
+        await tabToOtherSurface(page);
         await page.getByRole('button', { name: /start from 'paper sketch'/i }).click();
         await page.getByRole('button', { name: 'Export', exact: true }).click();
 
@@ -237,9 +238,8 @@ test.describe('PWA shell', () => {
 
     test('First Light starter exports in-browser @slow', async ({ page }) => {
         test.setTimeout(180_000);
-        await page.goto('/');
-        await page.getByRole('button', { name: /play here in your browser/i }).click();
-        await page.keyboard.press('Tab');
+        await bootApp(page);
+        await tabToOtherSurface(page);
         await page.getByRole('button', { name: /start from 'first light'/i }).click();
         await expect(page.locator('.arrangement-track')).toHaveCount(5);
         await page.getByRole('button', { name: 'Export', exact: true }).click();

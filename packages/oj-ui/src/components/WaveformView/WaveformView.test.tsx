@@ -1,16 +1,31 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { WaveformView } from './WaveformView';
+
+const waveformViewCss = readFileSync(
+    'packages/oj-ui/src/components/WaveformView/WaveformView.css',
+    'utf8',
+);
 
 const PEAKS = [0, 0.5, -0.5, 0.8, -0.3, 0];
 
 describe('WaveformView', () => {
+    it('pins selected/drop edges and 96% drag physics without changing the border box', () => {
+        expect(waveformViewCss).toMatch(/is-selected[\s\S]*?outline:\s*1\.5px solid var\(--accent-primary\)/);
+        expect(waveformViewCss).toMatch(/is-drop-target[\s\S]*?outline:\s*1\.5px dashed var\(--accent-primary\)/);
+        expect(waveformViewCss).toMatch(/is-dragging[\s\S]*?var\(--shadow-overlay\)[\s\S]*?scale\(0\.96\)/);
+    });
+    it('does not ship unreachable disabled or keyboard-focus rules on a presentational div', () => {
+        expect(waveformViewCss).not.toContain("[aria-disabled='true']");
+        expect(waveformViewCss).not.toContain('.oj-waveform-view:focus-visible');
+    });
     it('renders the base class, name and mono duration', () => {
         const { container } = render(
             <WaveformView peaks={PEAKS} durationLabel="2.4s" name="kick.wav" />,
         );
         const card = container.querySelector('.oj-waveform-view')!;
-        expect(card.className).toBe('oj-waveform-view');
+        expect(card.className).toContain('oj-waveform-view');
         expect(container.querySelector('.oj-waveform-view__name')!.textContent).toBe('kick.wav');
         expect(container.querySelector('.oj-waveform-view__duration')!.textContent).toBe('2.4s');
     });
@@ -42,7 +57,7 @@ describe('WaveformView', () => {
         const { container: cropped } = render(
             <WaveformView peaks={PEAKS} durationLabel="1s" name="x" cropped />,
         );
-        expect(cropped.querySelector('.oj-waveform-view__crop')).not.toBeNull();
+        expect(cropped.querySelector('.oj-waveform-view__crop')?.textContent).toBe('Cropped');
     });
 
     it('sets the native draggable attribute when draggable', () => {

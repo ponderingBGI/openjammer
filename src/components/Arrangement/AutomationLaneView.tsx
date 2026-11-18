@@ -4,6 +4,9 @@ import { addressableTrackParams, descriptorForLane, evaluateAutomation } from '.
 import { moveAutomationPoints, setAutomationRange } from '../../song/ops';
 import type { Arrangement, ArrangementTrack, AutomationLane, AutomationPoint } from '../../song/types';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { ownPointerGesture } from './pointerGestureLifetime';
+import { gridTicks, snapTimeline, useEditingContextStore } from '../../store/editingContextStore';
+import { timebase } from '../../song/time';
 
 export const AUTOMATION_LANE_HEIGHT = 96;
 const LANE_HEIGHT = AUTOMATION_LANE_HEIGHT;
@@ -14,15 +17,21 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
     const paramGroups = useMemo(() => [...new Set(params.map((param) => param.label.group))], [params]);
     const playheadTick = useArrangementStore((state) => state.playheadTick);
     const fieldRef = useRef<HTMLDivElement>(null);
-    const drag = useRef<{ arrangement: Arrangement; startX: number; startY: number; point: AutomationPoint; push: boolean; scale: number } | null>(null);
-    const rangeDrag = useRef<{ arrangement: Arrangement; startY: number; points: AutomationPoint[]; from: number; to: number } | null>(null);
+    const drag = useRef<{ arrangement: Arrangement; startX: number; startY: number; point: AutomationPoint; push: boolean; scale: number; cleanup: () => void } | null>(null);
+    const rangeDrag = useRef<{ arrangement: Arrangement; startY: number; points: AutomationPoint[]; from: number; to: number; cleanup: () => void } | null>(null);
+    const selectionDrag = useRef<{ from: number; cleanup: () => void } | null>(null);
     const [range, setRange] = useState<{ from: number; to: number } | null>(null);
     if (!descriptor || !lane.id) return null;
     const span = descriptor.max - descriptor.min || 1;
     const yFor = (value: number) => 8 + (1 - (value - descriptor.min) / span) * (LANE_HEIGHT - 16);
     const tickAt = (event: Pick<PointerEvent, 'clientX'>) => {
         const rect = fieldRef.current!.getBoundingClientRect();
-        return Math.max(0, Math.round((event.clientX - rect.left) / pxPerTick));
+        const rawTick = Math.max(0, (event.clientX - rect.left) / pxPerTick);
+        const context = useEditingContextStore.getState();
+        const tb = timebase(arrangement);
+        const result = snapTimeline({ rawTick, gridUnitTicks: gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, pxPerTick), anchorTicks: arrangement.tracks.flatMap((item) => item.clips.flatMap((clip) => [clip.startTick, clip.startTick + clip.lengthTick])).concat((arrangement.locations ?? []).flatMap((location) => [location.startTick, ...(location.endTick == null ? [] : [location.endTick])])), pxPerTick, mode: context.snapMode, target: context.snapTarget });
+        context.setSnapIndicatorTick(result.indicatorTick);
+        return Math.round(result.tick);
     };
     const valueAt = (clientY: number) => {
         const rect = fieldRef.current!.getBoundingClientRect();
@@ -54,15 +63,27 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
                 onDoubleClick={(event) => {
                     if ((event.target as HTMLElement).closest('.arrangement-automation__point')) return;
                     useArrangementStore.getState().apply({ kind: 'setAutomationPoint', laneId: lane.id!, point: { tick: tickAt(event), value: valueAt(event.clientY) } });
+                    useEditingContextStore.getState().setSnapIndicatorTick(null);
                 }}
                 onPointerDown={(event) => {
                     if (!event.shiftKey || event.button !== 0 || (event.target as HTMLElement).closest('.arrangement-automation__point')) return;
                     const tick = tickAt(event);
                     setRange({ from: tick, to: tick });
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                }}
-                onPointerMove={(event) => {
-                    if (event.currentTarget.hasPointerCapture(event.pointerId) && range && !rangeDrag.current) setRange({ from: range.from, to: tickAt(event) });
+                    const pointerId = event.pointerId;
+                    const finish = (commit: boolean) => {
+                        const current = selectionDrag.current;
+                        if (!current) return;
+                        current.cleanup();
+                        selectionDrag.current = null;
+                        useEditingContextStore.getState().setSnapIndicatorTick(null);
+                        if (!commit) setRange(null);
+                    };
+                    selectionDrag.current = { from: tick, cleanup: ownPointerGesture(pointerId, {
+                        move: (nativeEvent) => setRange({ from: tick, to: tickAt(nativeEvent) }),
+                        commit: () => finish(true),
+                        abort: () => finish(false),
+                    }) };
+                    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ }
                 }}
             >
                 <span className="arrangement-automation__default" aria-hidden="true" style={{ top: yFor(descriptor.default) }} />
@@ -81,19 +102,29 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
                     }}
                     onPointerDown={(event) => {
                         event.stopPropagation();
-                        event.currentTarget.setPointerCapture(event.pointerId);
                         const primary = event.ctrlKey || event.metaKey;
-                        drag.current = { arrangement, startX: event.clientX, startY: event.clientY, point, push: primary && event.shiftKey, scale: primary ? event.shiftKey ? 0.01 : 0.1 : 1 };
+                        const pointerId = event.pointerId;
+                        const move = (nativeEvent: globalThis.PointerEvent) => {
+                            const start = drag.current;
+                            if (!start) return;
+                            const rawDelta = Math.round((nativeEvent.clientX - start.startX) / pxPerTick * start.scale);
+                            const snappedTick = tickAt({ clientX: fieldRef.current!.getBoundingClientRect().left + (start.point.tick + rawDelta) * pxPerTick });
+                            const result = moveAutomationPoints(start.arrangement, lane.id!, [start.point.tick], snappedTick - start.point.tick, (start.startY - nativeEvent.clientY) / (LANE_HEIGHT - 16) * span * start.scale, start.push);
+                            useArrangementStore.getState().previewGesture(result.verbs);
+                        };
+                        const finish = (commit: boolean) => {
+                            const current = drag.current;
+                            if (!current) return;
+                            current.cleanup();
+                            drag.current = null;
+                            useEditingContextStore.getState().setSnapIndicatorTick(null);
+                            if (commit) useArrangementStore.getState().commitGesture();
+                            else useArrangementStore.getState().abortGesture();
+                        };
+                        drag.current = { arrangement, startX: event.clientX, startY: event.clientY, point, push: primary && event.shiftKey, scale: primary ? event.shiftKey ? 0.01 : 0.1 : 1, cleanup: ownPointerGesture(pointerId, { move, commit: () => finish(true), abort: () => finish(false) }) };
+                        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ }
                         useArrangementStore.getState().beginGesture('Move automation point');
                     }}
-                    onPointerMove={(event) => {
-                        const start = drag.current;
-                        if (!start) return;
-                        const result = moveAutomationPoints(start.arrangement, lane.id!, [start.point.tick], Math.round((event.clientX - start.startX) / pxPerTick * start.scale), (start.startY - event.clientY) / (LANE_HEIGHT - 16) * span * start.scale, start.push);
-                        useArrangementStore.getState().previewGesture(result.verbs);
-                    }}
-                    onPointerUp={() => { drag.current = null; useArrangementStore.getState().commitGesture(); }}
-                    onPointerCancel={() => { drag.current = null; useArrangementStore.getState().abortGesture(); }}
                 />)}
                 {range && <button
                     type="button"
@@ -104,19 +135,27 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
                         event.stopPropagation();
                         const from = Math.min(range.from, range.to);
                         const to = Math.max(range.from, range.to);
-                        rangeDrag.current = { arrangement, startY: event.clientY, points: lane.points.filter((point) => point.tick >= from && point.tick <= to), from, to };
-                        event.currentTarget.setPointerCapture(event.pointerId);
+                        const pointerId = event.pointerId;
+                        const move = (nativeEvent: globalThis.PointerEvent) => {
+                            const start = rangeDrag.current;
+                            if (!start) return;
+                            const delta = (start.startY - nativeEvent.clientY) / (LANE_HEIGHT - 16) * span;
+                            const points = start.points.map((point) => ({ ...point, value: point.value + delta }));
+                            useArrangementStore.getState().previewGesture(setAutomationRange(start.arrangement, lane.id!, start.from, start.to, points).verbs);
+                        };
+                        const finish = (commit: boolean) => {
+                            const current = rangeDrag.current;
+                            if (!current) return;
+                            current.cleanup();
+                            rangeDrag.current = null;
+                            useEditingContextStore.getState().setSnapIndicatorTick(null);
+                            if (commit) useArrangementStore.getState().commitGesture();
+                            else useArrangementStore.getState().abortGesture();
+                        };
+                        rangeDrag.current = { arrangement, startY: event.clientY, points: lane.points.filter((point) => point.tick >= from && point.tick <= to), from, to, cleanup: ownPointerGesture(pointerId, { move, commit: () => finish(true), abort: () => finish(false) }) };
+                        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ }
                         useArrangementStore.getState().beginGesture('Adjust automation range');
                     }}
-                    onPointerMove={(event) => {
-                        const start = rangeDrag.current;
-                        if (!start) return;
-                        const delta = (start.startY - event.clientY) / (LANE_HEIGHT - 16) * span;
-                        const points = start.points.map((point) => ({ ...point, value: point.value + delta }));
-                        useArrangementStore.getState().previewGesture(setAutomationRange(start.arrangement, lane.id!, start.from, start.to, points).verbs);
-                    }}
-                    onPointerUp={() => { rangeDrag.current = null; useArrangementStore.getState().commitGesture(); }}
-                    onPointerCancel={() => { rangeDrag.current = null; useArrangementStore.getState().abortGesture(); }}
                 />}
             </div>
         </>

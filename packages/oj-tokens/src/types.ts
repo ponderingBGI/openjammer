@@ -5,14 +5,13 @@
  * group authored in `tokens/themes/*.json`.
  */
 
-export interface ThemeColors {
+export interface ThemeValues {
     // Background colors
     bgPrimary: string;
     bgSecondary: string;
     bgNode: string;
     bgTertiary: string;
     bgCanvas: string;
-    bgCanvasAlt: string;
     bgNodeHeader: string;
 
     // Text colors
@@ -24,12 +23,7 @@ export interface ThemeColors {
     // Border colors
     borderSubtle: string;
     borderStrong: string;
-    borderSketch: string;
-
-    // Sketch / drawing colors
-    sketchBlack: string;
-    sketchGray: string;
-    sketchLight: string;
+    borderControl: string;
 
     // Accent colors
     accentPrimary: string;
@@ -39,19 +33,19 @@ export interface ThemeColors {
     accentDanger: string;
 
     // Audio connections (blue, directional)
-    audioInput: string;
-    audioOutput: string;
     audioConnection: string;
     audioConnected: string;
 
     // Control connections (grey, bidirectional)
-    controlInput: string;
-    controlOutput: string;
     controlConnection: string;
     controlConnected: string;
 
-    // Universal connections (adapts to connected type)
-    universalPort: string;
+    // Universal connections (adapts to connected type). There is ONE token: the
+    // socket and the cable are the same violet, so `--universal-connection` is
+    // both. A second `universalPort` was declared alongside it and never read by
+    // a single rule — it survived only in AGENTS.md's port law, which pointed the
+    // reader at the dormant one. Removed under code-value #8 (every production
+    // line is used); the law now names the token that paints.
     universalConnection: string;
 
     // Arrangement timeline
@@ -73,10 +67,24 @@ export interface ThemeColors {
     timelineSectionMarker: string;
     timelineLoopRange: string;
     timelineSelection: string;
+
+    // Elevation, focus, accessible semantic ink, and overlays
+    shadowRaised: string;
+    shadowOverlay: string;
+    shadowInset: string;
+    shadowPressed: string;
+    focusRing: string;
+    accentInk: string;
+    accentTwoInk: string;
+    successInk: string;
+    warningInk: string;
+    dangerInk: string;
+    audioInk: string;
+    overlayScrim: string;
 }
 
 export interface Theme {
     id: string;
     name: string;
-    colors: ThemeColors;
+    colors: ThemeValues;
 }

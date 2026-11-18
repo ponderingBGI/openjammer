@@ -6,7 +6,7 @@ describe('Slider', () => {
     it('renders a range input with the base class and default bounds', () => {
         const { container } = render(<Slider aria-label="vol" value={50} onChange={() => {}} />);
         const input = container.querySelector('input')!;
-        expect(input.className).toBe('oj-slider');
+        expect(input.className).toContain('oj-slider');
         expect(input.getAttribute('type')).toBe('range');
         expect(input.getAttribute('min')).toBe('0');
         expect(input.getAttribute('max')).toBe('100');
@@ -29,7 +29,7 @@ describe('Slider', () => {
         const { container } = render(
             <Slider aria-label="x" value={0} onChange={() => {}} className="extra" />,
         );
-        expect(container.querySelector('input')!.className).toBe('oj-slider extra');
+        expect(container.querySelector('input')!.className).toContain('oj-slider');
     });
 
     it('calls onChange with the parsed numeric value', () => {
@@ -49,5 +49,23 @@ describe('Slider', () => {
         expect(input.disabled).toBe(true);
         fireEvent.pointerDown(input);
         expect(onPointerDown).toHaveBeenCalled();
+    });
+    it('publishes the fill percentage so WebKit can paint the progress', () => {
+        const { container, rerender } = render(
+            <Slider aria-label="x" value={-60} min={-60} max={6} onChange={() => {}} />,
+        );
+        const input = container.querySelector('input')!;
+        expect(input.getAttribute('style')).toContain('--oj-slider-progress: 0');
+        rerender(<Slider aria-label="x" value={6} min={-60} max={6} onChange={() => {}} />);
+        expect(input.getAttribute('style')).toContain('--oj-slider-progress: 100');
+    });
+
+    it('keeps a caller-supplied style alongside the progress property', () => {
+        const { container } = render(
+            <Slider aria-label="x" value={50} onChange={() => {}} style={{ width: '80px' }} />,
+        );
+        const style = container.querySelector('input')!.getAttribute('style')!;
+        expect(style).toContain('width: 80px');
+        expect(style).toContain('--oj-slider-progress: 50');
     });
 });

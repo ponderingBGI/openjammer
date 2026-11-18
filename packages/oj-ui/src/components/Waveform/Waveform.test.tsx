@@ -1,15 +1,26 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Waveform } from './Waveform';
+
+const waveformCss = readFileSync(
+    'packages/oj-ui/src/components/Waveform/Waveform.css',
+    'utf8',
+);
 
 const sine = Array.from({ length: 16 }, (_, i) => Math.sin((i / 15) * Math.PI * 2));
 
 describe('Waveform', () => {
+    it('pins the audio trace, accent playhead and static reduced-motion recording state', () => {
+        expect(waveformCss).toMatch(/__trace[\s\S]*?var\(--audio-connection\)/);
+        expect(waveformCss).toMatch(/__playhead[\s\S]*?var\(--accent-primary\)[\s\S]*?1\.5/);
+        expect(waveformCss).toMatch(/prefers-reduced-motion[\s\S]*?animation:\s*none;[\s\S]*?opacity:\s*1/);
+    });
     it('renders the base wrapper, an svg, and a polyline trace', () => {
         const { container } = render(<Waveform data={sine} />);
         const root = container.querySelector('.oj-waveform')!;
         expect(root).not.toBeNull();
-        expect(root.className).toBe('oj-waveform');
+        expect(root.className).toContain('oj-waveform');
         expect(container.querySelector('svg.oj-waveform__svg')).not.toBeNull();
         expect(container.querySelector('polyline.oj-waveform__trace')).not.toBeNull();
     });

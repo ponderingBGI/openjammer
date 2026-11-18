@@ -169,11 +169,17 @@ describe('PluginManifest derivation', () => {
         expect(manifestFor('multiplier').ui).toBe('react');
         expect(manifestFor('sampler').ui).toBe('react');
         expect(manifestFor('container').ui).toBe('react'); // ContainerNode (schematic switch)
-        expect(manifestFor('piano').ui).toBe('react'); // InstrumentNode (schematic switch)
+        expect(manifestFor('keys').ui).toBe('react'); // InstrumentNode (schematic switch)
         expect(manifestFor('recorder').ui).toBe('react'); // RecorderNode (content switch)
+        // `instrument` is the generic voice the preset rigs install. It used to
+        // fall through to the free panel; it now takes InstrumentNode's own
+        // `case 'instrument':` branch, so the manifest has to say 'react' — a
+        // manifest that advertises a faceplate the node does not render is the
+        // one thing the `node-registry` doctor gate exists to catch.
+        expect(manifestFor('instrument').ui).toBe('react');
         // Free AutoParamPanel surfaces (NO NodeWrapper branch).
-        expect(manifestFor('instrument').ui).toBe('auto'); // generic node falls through to AutoParamPanel
-        expect(manifestFor('keyboard-key').ui).toBe('auto');
+        expect(manifestFor('pan').ui).toBe('auto');
+        expect(manifestFor('width').ui).toBe('auto');
     });
 
     it('counts ports from defaultPorts', () => {

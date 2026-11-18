@@ -4,8 +4,9 @@ import { assembleExportArgs } from './exportSpec';
 import type { BounceSpec, ExportProgress, ExportStats } from './types';
 import { downloadWav, encodeWav24 } from './wavEncoder';
 
-// Generated wasm-bindgen glue intentionally has no declaration file.
-// @ts-expect-error generated module
+// Generated wasm-bindgen glue, imported WITH its declarations: `build-wasm.sh`
+// emits `ojcore_wasm.d.ts` beside the glue, so calling an export the shipped
+// artefact does not have is a `tsc` error rather than a silent `any`.
 import initWasm, * as wasm from '../../audio/wasm/pkg/ojcore_wasm.js';
 
 const BLOCK = 128;

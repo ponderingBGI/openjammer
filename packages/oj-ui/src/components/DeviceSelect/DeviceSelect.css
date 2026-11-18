@@ -1,25 +1,46 @@
-/*
- * DeviceSelect — DESIGN.md §5. An audio-device picker: a node-fill Button
- * trigger over a Surface-backed popover list. Styled only via semantic tokens
- * (no literal colors), so it follows the active theme. The list rides the
- * popover layer and lifts on the hard, blur-free menu shadow (Hard-Shadow).
- * A low-latency device carries a lightning bolt beside its name, never on the
- * surface itself (Signal-Not-Brand).
- */
 .oj-device-select {
     position: relative;
     display: inline-flex;
-}
-
-/* Trigger — a full-width node Button laying out label · bolt · caret. */
-.oj-device-select__trigger {
     width: 100%;
-    gap: var(--space-xs);
-    justify-content: space-between;
+    min-width: 0;
 }
 
-/* The device name — clipped, never wrapping, so the trigger keeps its size
-   (No-Surprise: no reflow as labels change). */
+.oj-device-select__trigger {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    gap: var(--space-sm);
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    font: 500 var(--text-md)/1.3 var(--font-sans);
+    cursor: pointer;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        box-shadow var(--motion-fast), color var(--motion-fast);
+}
+
+.oj-device-select__trigger:hover:not(:disabled) {
+    border-color: var(--border-control);
+}
+
+.oj-device-select__trigger:focus-visible,
+.oj-device-select.is-open .oj-device-select__trigger {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
+}
+
+.oj-device-select__trigger:disabled {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .oj-device-select__label {
     flex: 1;
     min-width: 0;
@@ -29,43 +50,69 @@
     text-align: left;
 }
 
-/* Caret sits to the trailing edge and never shrinks. */
 .oj-device-select__caret {
     flex: none;
     color: var(--text-muted);
+    transition: color var(--motion-fast), transform var(--motion-spring);
 }
 
-/* The fast-path bolt on the trigger reads in the accent — its name beside it
-   carries the meaning (Signal-Not-Brand). */
-.oj-device-select__trigger-bolt {
+.oj-device-select.is-open .oj-device-select__caret {
+    transform: rotate(180deg);
+}
+
+.oj-device-select__latency {
+    display: inline-flex;
+    align-items: center;
     flex: none;
-    color: var(--accent-primary);
+    gap: 3px;
+    color: var(--accent-ink);
+    font: 600 var(--text-micro)/1 var(--font-sans);
+    white-space: nowrap;
 }
 
-/* Popover list — anchored under the trigger, lifted on the menu Surface. */
 .oj-device-select__list {
     position: absolute;
     top: calc(100% + var(--space-xs));
     left: 0;
     right: 0;
+    z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
     min-width: 100%;
-    padding: var(--space-xs);
-    gap: 1px;
+    padding: 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-node);
+    box-shadow: var(--shadow-overlay);
 }
 
-/* Each device is a ghost Button row: full width, label · trailing bolt. The
-   ghost variant already gives a bg-only hover with no lift (No-Surprise). */
 .oj-device-select__option {
+    display: flex;
+    align-items: center;
     width: 100%;
-    justify-content: space-between;
+    min-width: 0;
     gap: var(--space-sm);
-    border-radius: var(--radius-sm);
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-primary);
+    font: 500 var(--text-md)/1 var(--font-sans);
+    cursor: pointer;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        color var(--motion-fast);
 }
 
-/* The list bolt rides its row's text color so it flips with the selected
-   (is-active) fill — the device name beside it is the signal. */
-.oj-device-select__option-bolt {
-    flex: none;
+.oj-device-select__option:hover,
+.oj-device-select__option.is-active {
+    background: var(--bg-tertiary);
+}
+
+.oj-device-select__option.is-selected {
+    color: var(--accent-ink);
+}
+
+.oj-device-select__option.is-active {
+    border-color: var(--border-subtle);
 }

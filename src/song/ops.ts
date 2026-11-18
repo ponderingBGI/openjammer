@@ -6,15 +6,17 @@ import type { CutBuffer } from '../store/clipboardStore';
 export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedNoteIds?: string[]; skipped?: string[]; rejected?: string }
 
 export const EDIT_OPS = [
-    'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
+    'createClip', 'addMarker', 'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
     'cutSelection', 'copySelection', 'paste', 'pasteRepeat', 'selectRange', 'deleteRange', 'slipClip', 'splitRange', 'duplicateRange',
-    'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
+    'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'splitNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
     'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
     'setTrackGain', 'setTrackPan', 'addAutomationPoint', 'addAutomationPoints', 'setLaneState',
     'armTrack', 'setClick', 'setCountIn', 'record',
 ] as const;
 export type EditOpName = typeof EDIT_OPS[number];
 export type TimelineOp =
+    | { op: 'createClip'; trackId: string; startTick: number; lengthTick: number; name?: string }
+    | { op: 'addMarker'; atTick: number; name?: string }
     | { op: 'moveClips'; clipIds: string[]; deltaTick: number; toTrackId?: string; ripple?: boolean }
     | { op: 'trimClip'; clipIds: string[]; edge: 'start' | 'end'; atTick: number }
     | { op: 'splitAt'; clipIds: string[]; atTick: number }
@@ -38,6 +40,7 @@ export type TimelineOp =
     | { op: 'copyNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
     | { op: 'resizeNotes'; noteIds: string[]; edge: 'start' | 'end'; deltaTick?: number; at?: number; mode?: 'relative' | 'absolute' }
     | { op: 'eraseNotes'; noteIds?: string[]; range?: NoteRange }
+    | { op: 'splitNotes'; noteIds: string[]; atTick: number; minLengthTick?: number }
     | { op: 'setVelocity'; noteIds: string[]; mode: 'delta' | 'set' | 'ramp'; amount?: number; from?: number; to?: number; smush?: boolean }
     | { op: 'transposeNotes'; noteIds: string[]; semitones: number }
     | { op: 'quantizeNotes'; targets: string[]; grid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number }
@@ -60,6 +63,63 @@ export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-exist
 export interface NoteRange { fromTick: number; toTick: number; minPitch?: number; maxPitch?: number; sourceId?: string }
 
 interface LocatedNote { sourceId: string; source: MidiSource; note: ArrangementNote; index: number }
+
+/** Draw-tool operation: one empty MIDI source and its timeline window, undone atomically. */
+export function createClip(
+    arrangement: Arrangement,
+    trackId: string,
+    startTick: number,
+    lengthTick: number,
+    mintId: (prefix: string) => string,
+    name = 'MIDI clip',
+): OpResult {
+    if (!arrangement.tracks.some((track) => (track.id ?? track.ref) === trackId)) return { verbs: [], rejected: `no track "${trackId}"` };
+    if (!Number.isFinite(startTick) || startTick < 0) return { verbs: [], rejected: 'clip start must be zero or greater' };
+    if (!Number.isFinite(lengthTick) || lengthTick < 1) return { verbs: [], rejected: 'clip length must be at least one tick' };
+    const sourceId = mintId('src:midi');
+    const clipId = mintId('clip');
+    return {
+        verbs: [{
+            kind: 'compound',
+            verbs: [
+                { kind: 'addSource', source: { id: sourceId, kind: 'midi', name, notes: [], lengthTick } },
+                { kind: 'addClip', trackId, clip: { id: clipId, sourceId, startTick, lengthTick, name } },
+            ],
+        }],
+        selectedClipIds: [clipId],
+    };
+}
+
+/** One marker path for ruler, keyboard, command palette, and agent edits. */
+export function addMarker(arrangement: Arrangement, atTick: number, mintId: (prefix: string) => string, name?: string): OpResult {
+    if (!Number.isFinite(atTick) || atTick < 0) return { verbs: [], rejected: 'marker tick must be zero or greater' };
+    const markerNumber = (arrangement.locations ?? []).filter((location) => location.kind === 'mark').length + 1;
+    return {
+        verbs: [{ kind: 'addLocation', index: arrangement.locations?.length ?? 0, location: { id: mintId('location'), name: name?.trim() || `Marker ${markerNumber}`, kind: 'mark', startTick: Math.round(atTick) } }],
+    };
+}
+
+/**
+ * `I` / `O` set one loop edge from the playhead. The other edge follows so the
+ * range is always at least one grid unit long and never starts below zero —
+ * otherwise `I`/`O` at tick 0 emits `startTick: -1` and `applyVerb` throws
+ * "location cannot start below zero" as an uncaught page error mid-set.
+ */
+export function loopRangeForEdge(
+    current: { startTick?: number; endTick?: number } | undefined,
+    tick: number,
+    edge: 'in' | 'out',
+    gridUnitTicks: number,
+): { startTick: number; endTick: number } {
+    const unit = Math.max(1, Math.round(Number.isFinite(gridUnitTicks) ? gridUnitTicks : 1) || 1);
+    const at = Math.max(0, Math.round(Number.isFinite(tick) ? tick : 0));
+    if (edge === 'in') {
+        const startTick = at;
+        return { startTick, endTick: Math.max(startTick + unit, Math.round(current?.endTick ?? 0)) };
+    }
+    const endTick = Math.max(unit, at);
+    return { startTick: Math.max(0, Math.min(Math.round(current?.startTick ?? 0), endTick - unit)), endTick };
+}
 
 function findNote(arrangement: Arrangement, noteId: string): LocatedNote | undefined {
     for (const [sourceId, source] of Object.entries(arrangement.sources ?? {})) {
@@ -506,14 +566,14 @@ export function resizeNotes(
     return { verbs };
 }
 
-/** BC-32's exact pointer hit-zone geometry. */
-export function noteResizeZone(widthPx: number, xPx: number): 'start' | 'end' | undefined {
-    if (!(widthPx > 10)) return undefined;
-    const edgeWidth = Math.min(8, widthPx / 2 - 1);
-    if (xPx <= edgeWidth) return 'start';
-    if (xPx >= widthPx - edgeWidth) return 'end';
-    return undefined;
-}
+/*
+ * `noteResizeZone` lived here — a second implementation of BC-32's hit zone that
+ * nothing in production ever called, and that after HA-18 CONTRADICTED the one
+ * the roll actually uses (`>10` exclusive against `<10` inclusive) while holding
+ * the contract test that was supposed to pin it. Code values #7 and #8: the
+ * shipped path is `resizeEdge` in `components/PianoRoll/geometry.ts`, and it is
+ * now the only one. `pianoRollContracts.test.ts` gates that one.
+ */
 
 /** BC-32 generic-body fallback when no explicit edge handle was identified. */
 export const noteBodyResizeEdge = (xFraction: number): 'start' | 'end' => xFraction <= 0.25 ? 'start' : 'end';
@@ -527,6 +587,57 @@ export function eraseNotes(arrangement: Arrangement, request: { noteIds?: readon
     });
     const existing = ids.filter((id) => findNote(arrangement, id));
     return { verbs: existing.map((noteId) => ({ kind: 'removeNote', noteId })), skipped: ids.filter((id) => !existing.includes(id)) };
+}
+
+/**
+ * The KNIFE, on a note (U11).
+ *
+ * The Song's knife is `splitAt`; this is its twin one level down, and it is
+ * built from the two note verbs that already exist rather than a new one: the
+ * left half is an `editNote` that shortens the original (so its id, and every
+ * selection pointing at it, survives the cut) and the right half is one
+ * `addNote`. `apply()` batches both, so one cut is one Ctrl+Z.
+ *
+ * `atTick` is a SOURCE tick — the same coordinate `note.tick` is in.
+ *
+ * NO SLIVERS. A cut is refused unless BOTH halves clear `minLengthTick`, which
+ * defaults to the floor the Draw tool already uses (`noteDragFloor`). Testing
+ * only for `tick < at < end` was true at the exact edge and false one tick in:
+ * with `Ctrl` suspending the snap, a press 1px inside a note's left edge minted
+ * a 99-tick fragment that renders about a pixel wide, cannot be grabbed and is
+ * under the drag floor — a gesture producing something the player cannot then
+ * undo by hand. A caller with a grid passes it, so "one snap unit" is the floor
+ * where snapping is on and 1/32 where it is not.
+ */
+export function splitNotes(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    atTick: number,
+    mintId: (prefix: string) => string,
+    minLengthTick?: number,
+): OpResult {
+    const at = Math.round(atTick);
+    const floor = Math.max(1, Math.round(minLengthTick ?? noteDragFloor(arrangement.ppq ?? 960)));
+    const verbs: Verb[] = [];
+    const selectedNoteIds: string[] = [];
+    const skipped: string[] = [];
+    /* N5: one running index per source, so a multi-note cut appends in order. */
+    const appended = new Map<string, number>();
+    for (const id of noteIds) {
+        const found = findNote(arrangement, id);
+        if (!found) { skipped.push(id); continue; }
+        const noteEnd = found.note.tick + found.note.durTick;
+        if (at - found.note.tick < floor || noteEnd - at < floor) { skipped.push(id); continue; }
+        const { note, source, sourceId } = found;
+        const end = note.tick + note.durTick;
+        const right: ArrangementNote = { ...note, id: mintId('note'), tick: at, durTick: end - at };
+        verbs.push({ kind: 'editNote', noteId: note.id!, patch: { durTick: at - note.tick } });
+        const index = source.notes.length + (appended.get(sourceId) ?? 0);
+        appended.set(sourceId, (appended.get(sourceId) ?? 0) + 1);
+        verbs.push({ kind: 'addNote', sourceId, index, note: right });
+        selectedNoteIds.push(note.id!, right.id!);
+    }
+    return { verbs, selectedNoteIds, skipped };
 }
 
 /** BC-33. Without smush, one out-of-range value rejects the entire stroke. */

@@ -70,7 +70,12 @@ describe('UpdatesPanel', () => {
         expect(screen.getByRole('tab', { name: 'Stable' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tab', { name: 'Canari' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Download Stable/i })).toBeInTheDocument();
-        expect(screen.getByText(/Browser\/PWA updates apply on reload/i)).toBeInTheDocument();
+        // The hero carries the headline; the sentence that explains the tier sits
+        // on the row it belongs to, so neither one has to be both.
+        expect(screen.getByText('Updates apply on reload')).toBeInTheDocument();
+        expect(
+            screen.getByText(/browser version updates on reload; desktop channels are manual downloads/i),
+        ).toBeInTheDocument();
     });
 
     it('keeps channel and manual download controls visible on unsupported native installs', () => {
@@ -92,6 +97,30 @@ describe('UpdatesPanel', () => {
         expect(screen.getByRole('tab', { name: 'Canari' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Download Stable/i })).toBeInTheDocument();
         expect(screen.getAllByText(/Manual \.dmg updates/i).length).toBeGreaterThan(0);
+    });
+
+    /*
+     * HA-23 / U14 — Escape cancels the confirm and stops there. It used to fall
+     * through to the Settings modal underneath, so declining a destructive
+     * question closed the whole panel.
+     */
+    it('Escape cancels the rollback confirm without reaching Settings behind it', () => {
+        (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {};
+        mockUpdater({ status: status({ last_good_version: '0.0.1' }) });
+
+        render(<UpdatesPanel />);
+        fireEvent.click(screen.getByRole('button', { name: /Roll back/i }));
+        const confirm = screen.getByRole('alertdialog', { name: /Confirm rollback/i });
+
+        const reachedTheDocument = vi.fn();
+        document.addEventListener('keydown', reachedTheDocument);
+        fireEvent.keyDown(confirm, { key: 'Escape' });
+        document.removeEventListener('keydown', reachedTheDocument);
+
+        expect(screen.queryByRole('alertdialog', { name: /Confirm rollback/i })).toBeNull();
+        expect(reachedTheDocument).not.toHaveBeenCalled();
+        // The panel it lives in is still there — only the question went away.
+        expect(screen.getByRole('button', { name: /Roll back/i })).toBeInTheDocument();
     });
 
     it('checks the newly selected channel, not the previous render state', async () => {

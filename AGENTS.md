@@ -25,6 +25,24 @@ They are not decoration. They decide what good work looks like here.
    The core earns the right to be small by being perfect; the community earns the right to
    make OpenJammer anything. **When in doubt, it is a plugin. Every user makes it their own.**
 
+## The guiding star
+
+> **Build the set on the canvas. Bind it to your hands. Play without looking.**
+
+The node canvas is not a setup screen on the way to somewhere else; it is the instrument,
+and it is where a player spends most of their time. Every node is one simple, obvious
+building block, and the power is in putting them together — a patcher who knows ComfyUI,
+Max or a modular already speaks the language on day one, and a beginner grows into it
+one node at a time without ever being handed a wall. Then the set goes to the stage: any
+control and any verb — a knob, a mute, a looper's record, the transport, a scene change —
+binds to real MIDI hardware in one gesture (Ableton's Ctrl+M is the bar), the monitor goes
+dark, and the performer is in the moment with taped-up buttons and their own instruments,
+plugins, samples and loops. A band routed through one machine with a chain per player;
+a solo act with loops and samples; a recording session where Record lives on a pad — the
+same set, the same nodes, the same bindings. Everything in this file exists to make that
+true. When two designs compete, the one that keeps the player's eyes off the screen and
+their hands on the music wins.
+
 For *who* plays this and *why*, and for the design philosophy, see
 [PRODUCT.md](../../PRODUCT.md) (strategy, users, the instrument-not-a-dashboard line) and
 [DESIGN.md](../../DESIGN.md) (the visual system — "The Living Sketchbook"). Read those
@@ -154,20 +172,42 @@ Do not introduce `npm`/`yarn`/`pnpm` commands anywhere in the codebase or the do
   `/src/audio/`; state in `/src/store/` (Zustand); theming via the `packages/oj-tokens` CSS
   variables (+ global styles in `/src/styles/`).
 - **Naming:** components `PascalCase` (`KeyboardNode.tsx`); utilities `camelCase`
-  (`audioUtils.ts`); constants `SCREAMING_SNAKE_CASE`.
+  (`spawnPlacement.ts`); constants `SCREAMING_SNAKE_CASE`.
 - **Commits:** conventional — `feat:`, `fix:`, `docs:`, `refactor:`, `style:`, `test:`,
   `perf:`. Atomic and focused — one reversible idea each.
 
 ### Port types and colors
 
 Port color tells the eye what travels down a cable — the player learns it in seconds. The
-type is the source of truth; the color follows from it.
+type is the source of truth; the **token** follows from it, and the token is the only
+place a value lives. Name the type, never the hex.
 
-- `type: 'audio'` → **blue** (music / sound)
-- `type: 'technical'` → **grey** (numbers / triggers)
+- `type: 'audio'` → `--audio-connection` (**teal**) — music / sound
+- `type: 'control'` → `--control-connection` (**grey**) — numbers / triggers
+- `type: 'universal'` → `--universal-connection` (**violet**) — adapts to whatever it connects to
 
-Examples: keyboard outputs are `technical` (they send numbers, not sound); instrument
-inputs are `technical` (they receive triggers); instrument outputs are `audio` (they make
+The shipping union is `'audio' | 'control' | 'universal'` (`src/engine/types.ts`, and
+`packages/oj-ui/…/Port/Port.tsx`). **`'technical'` is a RETIRED type name** — this file
+named it for a long time after the code stopped: nothing keys off it, the CSS hook is
+`.oj-port--control`, and `graphStore` actively migrates it away on load. There is likewise
+only ONE universal token: `--universal-connection`, which paints both the socket and the
+cable. A dormant `--universal-port` was declared beside it with zero consumers and this law
+pointed at that one; it was deleted (code-value #8) and the law now names the token that
+actually paints.
+
+Sound is the only saturated one; control is deliberately desaturated so the signal that
+matters reads first. If you see `#4A90C2` — the old blue — it is stale
+([DESIGN.md](../../DESIGN.md) §2, "Wiring — the legend"). That is now mechanically enforced:
+`src/components/Arrangement/__tests__/tokenLiteralGate.test.ts` fails on the literal in any
+`.css`, `.ts` or `.tsx` under `src` or `packages/oj-ui/src`.
+
+These colours are MEANING, so do not spend them on anything that is not a port or a cable.
+A timeline mark that happens to want violet takes `--timeline-automation-line` (the same
+value, under the name that says what it is); a mark that has to stay legible against its
+ground takes the ink, `--accent-two-ink`.
+
+Examples: keyboard outputs are `control` (they send numbers, not sound); instrument
+inputs are `control` (they receive triggers); instrument outputs are `audio` (they make
 sound); effects are `audio` (they process sound).
 
 ### Extend, don't fork (the plugin boundary)

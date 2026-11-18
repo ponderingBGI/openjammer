@@ -1,102 +1,118 @@
 /*
- * Cable — the wire between two ports (DESIGN.md §2 Wiring, Port-Color-Is-Meaning).
- * Stroke color IS the signal type — audio blue, control grey, universal violet,
- * never decoration. signalLevel (--oj-cable-signal, 0..1) drives stroke-width,
- * opacity AND a soft glow so a HOT cable reads as alive.
+ * Cable — the wire between two sockets (New DNA: "sound is visible").
  *
- * The glow is the DESIGN.md §5 live-connection exception: "the one place a soft
- * glow is allowed — it signals a live connection, which is meaning, not
- * decoration" (the same sanctioned glow connected ports get). A fast 30ms attack
- * smooths the rAF-throttled signal updates; the <Cable> memo skips re-renders for
- * sub-1% signal deltas, so this never tweens needlessly. stroke-width here is an
- * SVG paint on the connection overlay — not a document-layout reflow.
+ * A cable is one of exactly two things on this canvas allowed to glow, and only
+ * while it is carrying something. `--oj-cable-signal` (0..1, written by the
+ * canvas each audio frame) drives width, opacity AND the glow, so at rest the
+ * wire is a thin quiet line and under a hot signal it swells and lights up. At
+ * signal 0 the formulas resolve to 2.5px / 45% / no filter on their own — the
+ * `.is-quiet` class is only there for callers that want to state it.
+ *
+ * `color` is set alongside `stroke` on every kind so the `currentColor` in the
+ * drop-shadow is the WIRE's color. Without that pair the glow inherits whatever
+ * `color` the SVG happened to have and a teal cable glows in text ink.
+ *
+ * Reduced motion does NOT still the width/opacity: they are a meter reporting
+ * the signal, not decoration (the blanket rule in global.css exempts .oj-cable).
+ * The marching dashes of a temp drag ARE decoration, and stop.
  */
 .oj-cable {
     --oj-cable-signal: 0;
     fill: none;
     stroke: var(--control-connection);
+    color: var(--control-connection);
     stroke-linecap: round;
-    pointer-events: stroke;
-    cursor: pointer;
-    stroke-width: calc(3px + var(--oj-cable-signal) * 3px);
-    opacity: calc(0.7 + var(--oj-cable-signal) * 0.3);
-    filter: drop-shadow(0 0 calc(var(--oj-cable-signal) * 6px) currentColor);
-    transition: stroke-width 0.03s ease-out, opacity 0.03s ease-out,
-        filter 0.03s ease-out, stroke var(--transition-fast);
+    pointer-events: none;
+    stroke-width: calc(2.5px + var(--oj-cable-signal) * 2.5px);
+    opacity: calc(0.5 + var(--oj-cable-signal) * 0.5);
+    filter: drop-shadow(0 0 calc(var(--oj-cable-signal) * 7px) currentColor);
+    transition: stroke-width 0.03s linear, opacity 0.03s linear,
+        stroke var(--motion-fast), color var(--motion-fast);
 }
 
-/* Wiring colors — the legend. The type is the source of truth. */
+/* Wiring colors — the legend. The port type is the source of truth. */
 .oj-cable--audio {
     stroke: var(--audio-connection);
+    color: var(--audio-connection);
 }
 
 .oj-cable--control {
     stroke: var(--control-connection);
+    color: var(--control-connection);
 }
 
 .oj-cable--universal {
     stroke: var(--universal-connection);
+    color: var(--universal-connection);
 }
 
-/* Hover — a touch heavier so the cable answers the pointer before a click. */
-.oj-cable:hover {
-    stroke-width: calc(5px + var(--oj-cable-signal) * 2px);
+/* An explicitly quiet cable — same place the formulas land at signal 0. */
+.oj-cable.is-quiet {
+    stroke-width: 2.5px;
+    opacity: 0.45;
+    filter: none;
 }
 
-/* Selected — brighten to the kind's connected color, thicken, and pulse the
-   live-connection glow. */
+/* The hit path: a fat invisible stroke drawn UNDER the wire so a 2.5px line is
+   still clickable at any zoom. It is the only pointer target in the group; the
+   visible path stays `pointer-events: none` so the two never fight. */
+.oj-cable__hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14px;
+    stroke-linecap: round;
+    pointer-events: stroke;
+    cursor: pointer;
+    transition: stroke var(--motion-fast);
+}
+
+/* Hover — the hit path tints faintly, so the cable answers the pointer before
+   the click without the wire itself lying about its signal level. */
+.oj-cable-group:hover .oj-cable__hit {
+    stroke: color-mix(in oklab, var(--accent-primary) 20%, transparent);
+}
+
+/* Selected — brighter and a pixel wider, plus an accent halo carried by the hit
+   path so the WIRE keeps its true color. No animation: a selected cable that is
+   silent must not look like a cable carrying sound. */
 .oj-cable.is-selected {
-    stroke-width: calc(5px + var(--oj-cable-signal) * 2px);
-    filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 16px currentColor);
-    animation: oj-cable-selected-glow 1s ease-in-out infinite alternate;
+    stroke-width: calc(3.5px + var(--oj-cable-signal) * 2.5px);
+    opacity: 1;
 }
 
-.oj-cable--audio.is-selected {
-    stroke: var(--audio-connected);
+/* The halo width is a FIXED px, not a signal calc: `--oj-cable-signal` is set on
+   the wire, and a calc() reading an undefined custom property is invalid at
+   computed-value time — which silently collapsed this stroke to the inherited
+   1px and made the selection halo disappear entirely. Selection is a UI state,
+   not a meter; it has no business scaling with the audio anyway. */
+.oj-cable-group.is-selected .oj-cable__hit {
+    stroke: color-mix(in oklab, var(--accent-primary) 42%, transparent);
+    stroke-width: 10px;
 }
 
-.oj-cable--control.is-selected {
-    stroke: var(--control-connected);
-}
-
-.oj-cable--universal.is-selected {
-    stroke: var(--universal-connection);
-}
-
-@keyframes oj-cable-selected-glow {
-    0% {
-        filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
-    }
-    100% {
-        filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 20px currentColor);
-    }
-}
-
-/* Bundled — one cable standing in for several; heavier with a steady glow so the
-   eye reads it as a thicker rope of signal. */
+/* Bundled — one cable standing in for several: a heavier rope. */
 .oj-cable.is-bundled {
-    stroke-width: calc(5px + var(--oj-cable-signal) * 5px);
-    filter: drop-shadow(0 0 calc(3px + var(--oj-cable-signal) * 10px) currentColor);
-}
-
-.oj-cable.is-bundled:hover {
-    stroke-width: calc(7px + var(--oj-cable-signal) * 4px);
+    stroke-width: calc(4.5px + var(--oj-cable-signal) * 3px);
 }
 
 .oj-cable.is-bundled.is-selected {
-    stroke-width: calc(7px + var(--oj-cable-signal) * 4px);
-    filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 18px currentColor);
+    stroke-width: calc(5.5px + var(--oj-cable-signal) * 3px);
 }
 
-/* Temp — an in-progress drag from a port to the cursor. Dashed + marching so it
-   reads as pending, not yet committed (Honest-Interfaces). */
+/* Temp — an in-progress drag from a socket to the cursor, in the SOURCE port's
+   kind color. Dashed + marching so it reads as pending, not committed. */
 .oj-cable.is-temp {
     stroke-dasharray: 6 4;
-    opacity: 0.6;
-    pointer-events: none;
+    opacity: 0.7;
+    filter: none;
     cursor: default;
     animation: oj-cable-dash 0.5s linear infinite;
     will-change: stroke-dashoffset;
+}
+
+/* Nothing to click on a cable that does not exist yet. */
+.oj-cable-group.is-temp .oj-cable__hit {
+    pointer-events: none;
 }
 
 @keyframes oj-cable-dash {
@@ -106,7 +122,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .oj-cable.is-selected,
     .oj-cable.is-temp {
         animation: none;
     }

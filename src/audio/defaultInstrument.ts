@@ -1,7 +1,7 @@
 /**
  * Built-in instrument voices (the playable-out-of-the-box layer).
  *
- * Melodic instrument nodes (Keys, Piano, Cello, Sax, …) lower to the engine's
+ * Melodic instrument nodes (Keys, Strings, Winds, Instrument) lower to the engine's
  * `builtin.sampler` (see `src/engine/manifest.ts`), which is **silent until PCM
  * is bound**. The repo ships no sample assets, so without help a freshly-wired
  * `MiniLab → Keys → Speaker` patch produces no sound — the note routes correctly
@@ -30,16 +30,12 @@ import {
 
 /**
  * Instrument node types that receive a built-in voice when they have no
- * user-bound sample. The category aliases plus the generic `instrument` picker
- * (which resolves its voice from the selected `instrumentId`).
+ * user-bound sample. The three family nodes plus the generic `instrument`
+ * picker (all of which resolve their voice from the selected `instrumentId`
+ * when one is set, and from the node type otherwise).
  */
 export const DEFAULT_VOICE_INSTRUMENTS: ReadonlySet<string> = new Set([
     'keys',
-    'piano',
-    'cello',
-    'electricCello',
-    'violin',
-    'saxophone',
     'strings',
     'winds',
     'instrument',
@@ -122,8 +118,8 @@ export function getVoiceForInstrumentNode(
             key: instrumentId,
         };
     }
-    // No picker selection: resolve a voice from the node TYPE itself (e.g. the
-    // `cello` / `saxophone` category nodes), falling back to the warm default.
+    // No picker selection: resolve a voice from the node TYPE itself (the
+    // `strings` / `winds` family nodes), falling back to the warm default.
     const family = resolveVoiceFamily(nodeType);
     return { voice: getFamilyVoice(family), key: `type:${nodeType}` };
 }

@@ -9,13 +9,38 @@ function renderInSvg(node: React.ReactNode) {
 }
 
 describe('Cable', () => {
-    it('renders a path with the base + kind classes', () => {
+    it('renders the hit path first and the wire over it, both on the same curve', () => {
         const { container } = renderInSvg(
             <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 100, y: 0 }} />,
         );
-        const path = container.querySelector('path')!;
-        expect(path.getAttribute('class')).toContain('oj-cable');
-        expect(path.getAttribute('class')).toContain('oj-cable--audio');
+        const paths = container.querySelectorAll('path');
+        expect(paths).toHaveLength(2);
+        // UI-022: the fat invisible target is UNDER the 2.5px wire.
+        expect(paths[0]!.getAttribute('class')).toBe('oj-cable__hit');
+        expect(paths[1]!.getAttribute('class')).toContain('oj-cable--audio');
+        expect(paths[0]!.getAttribute('d')).toBe(paths[1]!.getAttribute('d'));
+    });
+
+    it('marks a silent cable quiet so it carries no glow at rest', () => {
+        const { container } = renderInSvg(
+            <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 10, y: 0 }} />,
+        );
+        expect(container.querySelector('.oj-cable')!.getAttribute('class')).toContain('is-quiet');
+
+        const { container: hot } = renderInSvg(
+            <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 10, y: 0 }} signalLevel={0.4} />,
+        );
+        expect(hot.querySelector('.oj-cable')!.getAttribute('class')).not.toContain('is-quiet');
+    });
+
+    it('mirrors the state classes onto the group so the halo can sit under the wire', () => {
+        const { container } = renderInSvg(
+            <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 10, y: 0 }} selected bundled />,
+        );
+        const group = container.querySelector('g')!.getAttribute('class')!;
+        expect(group).toContain('oj-cable-group');
+        expect(group).toContain('is-selected');
+        expect(group).toContain('is-bundled');
     });
 
     it('applies selected, bundled and temp state classes', () => {
@@ -29,7 +54,7 @@ describe('Cable', () => {
                 temp
             />,
         );
-        const cls = container.querySelector('path')!.getAttribute('class')!;
+        const cls = container.querySelector('.oj-cable')!.getAttribute('class')!;
         expect(cls).toContain('oj-cable--control');
         expect(cls).toContain('is-selected');
         expect(cls).toContain('is-bundled');
@@ -52,18 +77,18 @@ describe('Cable', () => {
         const { container } = renderInSvg(
             <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 10, y: 0 }} signalLevel={2} />,
         );
-        const path = container.querySelector('path') as SVGPathElement;
+        const path = container.querySelector('.oj-cable') as SVGPathElement;
         expect(path.style.getPropertyValue('--oj-cable-signal')).toBe('1.000');
     });
 
-    it('calls onSelect and stops propagation when the stroke is clicked', () => {
+    it('calls onSelect and stops propagation when the hit path is clicked', () => {
         const onSelect = vi.fn();
         const { container } = renderInSvg(
             <Cable kind="audio" start={{ x: 0, y: 0 }} end={{ x: 10, y: 0 }} onSelect={onSelect} />,
         );
-        const path = container.querySelector('path')!;
+        const hit = container.querySelector('.oj-cable__hit')!;
         const evt = new MouseEvent('click', { bubbles: true, cancelable: true });
-        path.dispatchEvent(evt);
+        hit.dispatchEvent(evt);
         expect(onSelect).toHaveBeenCalledTimes(1);
         expect(evt.defaultPrevented).toBe(false);
     });

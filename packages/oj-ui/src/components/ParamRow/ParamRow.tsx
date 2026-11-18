@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type HTMLAttributes, type ReactNode } from 'react';
 import { Slider } from '../Slider/Slider';
 import './ParamRow.css';
 
@@ -20,11 +20,30 @@ export interface ParamRowProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onC
 }
 
 export function ParamRow({ label, value, valueText, min, max, step, readOnly, driven, pinned, onChange, onGestureStart, onGestureEnd, onLabelClick, control, className, ...rest }: ParamRowProps) {
+    const gestureOpenRef = useRef(false);
+    const startGesture = useCallback(() => {
+        if (gestureOpenRef.current) return;
+        gestureOpenRef.current = true;
+        onGestureStart?.();
+    }, [onGestureStart]);
+    const closeGesture = useCallback(() => {
+        if (!gestureOpenRef.current) return;
+        gestureOpenRef.current = false;
+        onGestureEnd?.();
+    }, [onGestureEnd]);
+    useEffect(() => {
+        window.addEventListener('blur', closeGesture);
+        return () => {
+            window.removeEventListener('blur', closeGesture);
+            closeGesture();
+        };
+    }, [closeGesture]);
+
     return <div className={['oj-param-row', className].filter(Boolean).join(' ')} {...rest}>
         <div className="oj-param-row__line">
             <button type="button" className="oj-param-row__label" title={label} aria-pressed={pinned} onClick={onLabelClick}>{label}</button>
             <span className={`oj-param-row__value${driven ? ' is-driven' : ''}`}>{valueText}</span>
         </div>
-        {!readOnly && (control ?? <Slider aria-label={label} aria-valuetext={valueText} min={min} max={max} step={step} value={value} onChange={onChange ?? (() => {})} onPointerDown={onGestureStart} onPointerUp={onGestureEnd} onPointerCancel={onGestureEnd} onMouseDown={(event) => event.stopPropagation()} />)}
+        {!readOnly && (control ?? <Slider aria-label={label} aria-valuetext={valueText} min={min} max={max} step={step ?? 1} value={value} onChange={onChange ?? (() => {})} onPointerDown={startGesture} onPointerUp={closeGesture} onPointerCancel={closeGesture} onBlur={closeGesture} onMouseDown={(event) => event.stopPropagation()} />)}
     </div>;
 }

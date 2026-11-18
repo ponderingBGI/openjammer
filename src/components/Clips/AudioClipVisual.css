@@ -1,65 +1,60 @@
-/**
- * AudioClipVisual - Styling for lightweight audio clips
+/*
+ * AudioClipVisual — a sample clip, on the canvas / in a looper / in the library.
  *
- * Matches the schematic/hand-drawn aesthetic of the rest of the app.
- * Uses theme-aware CSS variables for colors.
+ * Same physics as the oj-ui `WaveformView` (that component is the library's
+ * statement of what a clip card IS: surface fill, one hairline, sh1, grab
+ * cursor, `scale(.96)` + overlay shadow while dragging, a 1.5px accent outline
+ * when selected, a dashed one when it is a drop target). This file expresses the
+ * same rules for the clip that carries its own live waveform SVG and its own
+ * crop/duration badges — nothing here contradicts WaveformView, and the two
+ * should always be swapped in one edit if either changes.
+ *
+ * What is gone: the teal `drop-shadow` halo on the trace (only signal glows),
+ * the 2px accent ring, the 16px success halo on a drop target, and three
+ * black-alpha shadows.
  */
 
-/* ============================================
- * Base Clip Container
- * ============================================ */
+/* ── Base card ─────────────────────────────────────────────────────────── */
 
 .audio-clip {
     position: relative;
     display: flex;
     flex-direction: column;
     background: var(--bg-node);
-    border: 1.5px solid var(--border-sketch);
-    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-raised);
     cursor: grab;
     user-select: none;
-    transition:
-        transform var(--transition-fast),
-        box-shadow var(--transition-fast),
-        border-color var(--transition-fast);
-    overflow: visible;
+    overflow: hidden;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast),
+        color var(--motion-fast), transform var(--motion-spring);
 }
 
 .audio-clip:hover {
-    border-color: var(--audio-connected);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-color: var(--border-strong);
 }
 
 .audio-clip:active {
     cursor: grabbing;
 }
 
-/* ============================================
- * State Variants
- * ============================================ */
+/* ── States ────────────────────────────────────────────────────────────── */
 
 .audio-clip.selected {
-    border-color: var(--audio-connected);
-    box-shadow:
-        0 0 0 2px var(--audio-connected),
-        0 2px 12px color-mix(in srgb, var(--audio-connected) 30%, transparent);
+    outline: 1.5px solid var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 .audio-clip.dragging {
-    opacity: 0.85;
-    transform: scale(1.02);
-    box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.25),
-        0 0 0 2px var(--audio-connected);
+    box-shadow: var(--shadow-overlay);
+    transform: scale(0.96);
     cursor: grabbing;
-    z-index: 1000;
 }
 
 .audio-clip.drop-target {
-    border-color: var(--accent-success);
-    box-shadow:
-        0 0 0 2px var(--accent-success),
-        0 0 16px color-mix(in srgb, var(--accent-success) 40%, transparent);
+    outline: 1.5px dashed var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 .audio-clip.on-canvas {
@@ -67,16 +62,13 @@
     pointer-events: auto;
 }
 
-/* ============================================
- * Waveform Container
- * ============================================ */
+/* ── Waveform ──────────────────────────────────────────────────────────── */
 
 .audio-clip-waveform {
     position: relative;
     flex: 1;
     min-height: 0;
     background: var(--bg-canvas);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     overflow: hidden;
 }
 
@@ -86,46 +78,41 @@
     display: block;
 }
 
+/* The trace is the wiring colour, flat. A clip on a shelf is not carrying
+   signal, so it does not glow — the old `drop-shadow` halo said it was. */
 .audio-clip-waveform-path {
-    stroke: var(--audio-connected);
-    filter: drop-shadow(0 0 2px var(--audio-connected));
+    stroke: var(--audio-connection);
 }
 
 .audio-clip-center-line {
     stroke: var(--border-subtle);
     stroke-width: 0.5;
-    opacity: 0.3;
 }
 
-/* ============================================
- * Duration Badge
- * ============================================ */
+/* ── Duration badge (exact, so mono) ───────────────────────────────────── */
 
 .audio-clip-duration {
     position: absolute;
     top: 2px;
-    right: 4px;
+    right: var(--space-xs);
+    padding: 0 var(--space-xs);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-xs);
+    line-height: 1.4;
     color: var(--text-muted);
-    background: color-mix(in srgb, var(--bg-node) 80%, transparent);
-    padding: 1px 4px;
-    border-radius: 3px;
-    line-height: 1;
 }
 
-/* ============================================
- * Crop Indicator
- * ============================================ */
+/* ── Crop indicator ────────────────────────────────────────────────────── */
 
 .audio-clip-crop-indicator {
     position: absolute;
     bottom: 2px;
-    left: 4px;
-    color: var(--accent-warning);
-    opacity: 0.7;
+    left: var(--space-xs);
     width: 12px;
     height: 12px;
+    color: var(--warning-ink);
 }
 
 .audio-clip-crop-indicator svg {
@@ -133,39 +120,43 @@
     height: 100%;
 }
 
-/* ============================================
- * Filename Label
- * ============================================ */
+/* ── Filename ──────────────────────────────────────────────────────────── */
 
 .audio-clip-name {
-    padding: 2px 6px 4px;
-    font-family: var(--font-sketch);
+    padding: 2px var(--space-sm) 4px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-node);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 500;
     color: var(--text-secondary);
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--bg-node);
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
 
-/* ============================================
- * Drag Handle
- * ============================================ */
+.audio-clip:hover .audio-clip-name {
+    color: var(--text-primary);
+}
+
+.audio-clip.selected .audio-clip-name {
+    color: var(--accent-ink);
+}
+
+/* ── Drag handle (a hint, revealed on hover) ───────────────────────────── */
 
 .audio-clip-drag-handle {
     position: absolute;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
     width: 16px;
     height: 16px;
+    transform: translate(-50%, -50%);
     color: var(--text-muted);
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--transition-fast);
+    transition: opacity var(--motion-fast);
 }
 
 .audio-clip:hover .audio-clip-drag-handle {
@@ -181,33 +172,19 @@
     height: 100%;
 }
 
-/* ============================================
- * Animation for new clips
- * ============================================ */
+/* ── Arrival ───────────────────────────────────────────────────────────── */
+
+.audio-clip.on-canvas {
+    animation: clip-appear var(--motion-spring);
+}
 
 @keyframes clip-appear {
     from {
         opacity: 0;
-        transform: scale(0.8);
+        transform: scale(0.92);
     }
     to {
         opacity: 1;
         transform: scale(1);
     }
-}
-
-.audio-clip.on-canvas {
-    animation: clip-appear 0.2s ease-out;
-}
-
-/* ============================================
- * Hover effects for interactive elements
- * ============================================ */
-
-.audio-clip:hover .audio-clip-name {
-    color: var(--text-primary);
-}
-
-.audio-clip.selected .audio-clip-name {
-    color: var(--audio-connected);
 }

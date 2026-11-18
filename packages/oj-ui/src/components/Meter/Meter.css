@@ -1,0 +1,55 @@
+/*
+ * Meter — New DNA (handoff `.meter`).
+ *
+ * Bars scale from ONE custom property the owner writes per animation frame:
+ * `--oj-meter-signal` (0..1). Each bar carries its own `--oj-meter-k` so the row
+ * arches slightly and reads as a meter rather than a progress bar.
+ *
+ * The 60ms linear transition is deliberate and is NOT decoration — it is the
+ * ballistics of the meter, the thing that makes a transient legible instead of a
+ * flicker. `global.css` exempts `.oj-meter` from the blanket reduced-motion rule
+ * for exactly this reason: a meter that stops reporting is a broken instrument,
+ * not a calm one.
+ */
+
+.oj-meter {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2.5px;
+    height: var(--oj-meter-height, 18px);
+    flex: none;
+}
+
+/* The track: always there, so silence reads as a quiet meter rather than a
+   dashed rule someone forgot to finish. */
+.oj-meter__bar {
+    position: relative;
+    width: var(--oj-meter-bar-width, 3.5px);
+    height: 100%;
+    border-radius: 2px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+/*
+ * The fill: the only thing that moves with the sound.
+ *
+ * `--success-ink`, not `--accent-success`. The lit bar is the READOUT — the
+ * meaning-carrying mark — so WCAG 1.4.11's 3:1 applies against the bed it is
+ * read out of (`--bg-tertiary`): the accent measured 2.61:1 in light
+ * (W5-P7-REVIEW claim 2). The ink is the same green at a readable lightness, so
+ * the three states still read as three: bed, lit, and the danger latch.
+ */
+.oj-meter__fill {
+    position: absolute;
+    inset: 0;
+    border-radius: 2px;
+    background: var(--success-ink);
+    transform-origin: bottom;
+    transform: scaleY(calc(var(--oj-meter-signal, 0) * var(--oj-meter-k, 1)));
+    transition: transform 60ms linear, background-color var(--motion-fast);
+}
+
+.oj-meter.is-clipping .oj-meter__fill {
+    background: var(--accent-danger);
+}

@@ -1,10 +1,4 @@
-/*
- * List + ListRow — the one selected/hover/current ruleset shared by every list
- * surface (command-palette results, /resume sessions, looper loops, model rows).
- * Styled only via semantic tokens (no literal colors, no raw px outside the
- * scale), so it follows the active theme. Hard rings only — zero blur radius
- * (DESIGN.md §4 Hard-Shadow); feedback is color/border, no reflow (No-Surprise).
- */
+
 .oj-list {
     display: flex;
     flex-direction: column;
@@ -18,53 +12,99 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid transparent;
-    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    border-radius: 8px;
     background: transparent;
     color: var(--text-primary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
+    font-weight: 500;
     cursor: pointer;
     user-select: none;
-    transition: background var(--transition-fast), border-color var(--transition-fast),
-        box-shadow var(--transition-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
 
 .oj-list-row:hover {
     background: var(--bg-tertiary);
 }
 
-/* Selected — the hard accent ring + faint accent fill (No-Surprise: no lift,
-   no reflow; the color/border is the feedback). */
+
 .oj-list-row.is-selected {
-    border-color: var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+    background: var(--bg-tertiary);
+    color: var(--accent-ink);
 }
 
-.oj-list-row.is-selected:hover {
-    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+.oj-list-row:focus-visible {
+    outline: 1.5px solid var(--accent-primary);
+    outline-offset: 1px;
 }
 
-/* Current — the row that *is* the live value. A left accent marker (inset hard
-   shadow, zero blur) reads apart from a multi-pick selection. */
-.oj-list-row.is-current {
-    box-shadow: inset 3px 0 0 var(--accent-primary);
+/* The dot keeps the 8px it has always stood at: 4px of margin plus the body's
+   4px gap in a flex body, and the full 8px in a plain-text one (below). */
+.oj-list-row.is-current .oj-list-row__body::before {
+    content: '';
+    display: inline-block;
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-right: var(--space-xs);
+    border-radius: var(--radius-pill);
+    background: var(--accent-ink);
+    vertical-align: middle;
 }
 
-.oj-list-row.is-selected.is-current {
-    box-shadow: inset 3px 0 0 var(--accent-primary),
-        0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+.oj-list-row.is-current .oj-list-row__body:not(:has(*))::before {
+    margin-right: var(--space-sm);
 }
 
 .oj-list-row.is-disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: default;
     pointer-events: none;
 }
 
-/* The text/content column — flexes to fill, truncates gracefully. */
+/*
+ * THE TEXT/CONTENT COLUMN — and it is a ROW, declared once, here.
+ *
+ * The body used to declare only `flex: 1; min-width: 0`. As a flex item of the
+ * row it was blockified, so anything a consumer put inside it stayed INLINE: an
+ * empty `<span>` sized in px painted nothing (the Library's 8px tag dot
+ * measured 0×0 on screen — W5-P7b F2) and a sibling's ellipsis never fired.
+ * Six consumers had each re-declared the same three lines to work around it
+ * (`.ah-row`, `.collab-peer`, `.devlog-row`, `.plugin-browser__quarantine-row`,
+ * `.looper-layer`, `.library-file-row`). That is the symptom; this is the cause.
+ * Consumers keep overriding `gap` (or swapping in a grid) — those rules are more
+ * specific and still win.
+ */
 .oj-list-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex: 1;
+    min-width: 0;
+}
+
+/*
+ * ...except when the body IS the text. `text-overflow: ellipsis` applies to
+ * block containers only, so turning a plain-text body into a flex box would
+ * silently trade a consumer's ellipsis for a hard clip (the command bar's
+ * rewind list is exactly that shape). A body with no element children needs no
+ * row, so it keeps the block box it has always computed to.
+ */
+.oj-list-row__body:not(:has(*)) {
+    display: block;
+}
+
+/*
+ * The commonest shape in the app is ONE wrapper element inside the body
+ * (`.relink-sample-info`, `.plugin-browser__identity`, `.command-bar-model-main`).
+ * As a block box it filled the body; as a flex item it would shrink to its
+ * content and take its `min-width: 0` truncation with it. Restore the fill, and
+ * only for the case where nothing else is competing for the room — a body with
+ * siblings keeps whatever `flex` its own stylesheet gives them.
+ */
+.oj-list-row__body > :only-child {
     flex: 1;
     min-width: 0;
 }

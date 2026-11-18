@@ -1,0 +1,64 @@
+/* MicrophoneNode — the live-input faceplate.
+ *
+ * The Speaker's mirror image, deliberately: the same two halves in the same
+ * order (what the signal is doing, then where it comes from), so a player who
+ * has read one card has read both. What is different is the direction — the
+ * socket is on the right, and the level meter is a wide, low bed rather than a
+ * tall column, because an input is a stream you watch, not a level you set.
+ *
+ * Rebuilt in W5-P6. */
+
+.oj-node.microphone-node {
+    width: 216px;
+}
+
+/* ---- The live half ------------------------------------------------------
+ * On the card surface, NOT on an inset bed: the oj-ui Meter draws its idle
+ * tracks in `--bg-tertiary`, so a meter sitting on a `--bg-tertiary` panel is a
+ * meter you cannot see. (Noted as an oj-ui API need — the track wants to be a
+ * local custom property.) */
+.mic-stage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.mic-level {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+}
+
+.mic-db {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* Muted is not "dimmed" — the meter reads exactly what is arriving, which is
+   nothing. The number says so, and the button carries the state. */
+.mic-stage.is-muted .mic-db {
+    color: var(--danger-ink);
+}
+
+.mic-mute.oj-icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+}
+
+.mic-mute.oj-icon-btn[aria-pressed='true'] {
+    background: color-mix(in oklab, var(--accent-danger) 12%, var(--bg-tertiary));
+    color: var(--danger-ink);
+}
+
+/* ---- The route half ----------------------------------------------------- */
+.mic-route {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+}

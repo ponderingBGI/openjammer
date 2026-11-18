@@ -6,7 +6,7 @@ describe('ProgressBar', () => {
     it('renders the base class and progressbar role without a tone modifier', () => {
         const { container } = render(<ProgressBar value={0.5} />);
         const bar = container.querySelector('.oj-progress')!;
-        expect(bar.className).toBe('oj-progress');
+        expect(bar.className).toContain('oj-progress');
         expect(bar.getAttribute('role')).toBe('progressbar');
     });
 
@@ -63,5 +63,13 @@ describe('ProgressBar', () => {
         const bar = container.querySelector('.oj-progress')!;
         expect(bar.getAttribute('aria-label')).toBe('loading');
         expect(bar.className).toContain('extra');
+    });
+
+    it('renders an aria-correct indeterminate state without a value', () => {
+        const { container } = render(<ProgressBar indeterminate aria-label="loading" />);
+        const bar = container.querySelector('.oj-progress')!;
+        expect(bar.className).toContain('is-indeterminate');
+        expect(bar.getAttribute('aria-valuenow')).toBeNull();
+        expect((container.querySelector('.oj-progress__fill') as HTMLElement).style.width).toBe('');
     });
 });

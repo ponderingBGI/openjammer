@@ -7,7 +7,32 @@ import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useIsAgentPending } from '../../store/agentSessionStore';
-import { generateUniqueId } from '../../utils/idGenerator';
+import { beginConnectionFrom, completeConnectionAt } from './connectionVerbs';
+import { announce } from '../../a11y/announce';
+// The schematic faceplate stylesheets, in ONE explicit order.
+//
+// Each family file is also imported by its own component (so a node styles
+// itself in isolation — Ladle, unit tests, future extraction); the bundler
+// emits one copy either way. But *order* decides who wins between two
+// same-specificity rules, and leaving it to the order in which node components
+// happen to be imported below would mean a harmless reorder of that list
+// silently restyles the canvas. So the cascade is pinned here instead, above
+// every component import, in the exact order these blocks had inside the former
+// single SchematicNodes.css. `SchematicBase.css` is first (it also pulls
+// `_sockets.css`) because every family may override its single-class rules.
+import './SchematicBase.css';
+import './SpeakerNode.css';
+import './KeyboardNode.css';
+import './InstrumentNode.css';
+import './LooperNode.css';
+import './MicrophoneNode.css';
+import './CanvasIONode.css';
+import './PortPanelNode.css';
+import './KeyboardVisualNode.css';
+import './ContainerNode.css';
+import './MathNode.css';
+import './LibraryNode.css';
+import './SamplerNode.css';
 import { InstrumentNode } from './InstrumentNode';
 import { MicrophoneNode } from './MicrophoneNode';
 import { KeyboardNode } from './KeyboardNode';
@@ -37,7 +62,6 @@ import { resolveNodeDefinition } from '../../engine/registry';
 import { getDynamicPlugin, HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import { NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
-import './BaseNode.css';
 
 interface NodeWrapperProps {
     node: GraphNode;
@@ -52,7 +76,7 @@ const SCHEMATIC_TYPES = [
     'midi-visual',
     'minilab-3',
     'minilab3-visual',
-    'piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds',
+    'instrument', 'strings', 'keys', 'winds',
     'speaker',
     'looper',
     'microphone',
@@ -73,7 +97,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const [isDragging, setIsDragging] = useState(false);
     const [pluginWindowOpen, setPluginWindowOpen] = useState(false);
     const dragStart = useRef<Position>({ x: 0, y: 0 });
-    const nodeStart = useRef<Position>({ x: 0, y: 0 });
+    const nodeStarts = useRef<Map<string, Position>>(new Map());
 
     // Store cleanup function for drag handlers to prevent memory leaks on unmount
     const dragCleanupRef = useRef<(() => void) | null>(null);
@@ -90,15 +114,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
     const selectNode = useGraphStore((s) => s.selectNode);
-    const updateNodePosition = useGraphStore((s) => s.updateNodePosition);
+    const moveNodes = useGraphStore((s) => s.moveNodes);
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const connections = useGraphStore((s) => s.connections);
-    const addConnection = useGraphStore((s) => s.addConnection);
 
     const zoom = useCanvasStore((s) => s.zoom);
-    const startConnecting = useCanvasStore((s) => s.startConnecting);
-    const stopConnecting = useCanvasStore((s) => s.stopConnecting);
     const isConnecting = useCanvasStore((s) => s.isConnecting);
     const connectingFrom = useCanvasStore((s) => s.connectingFrom);
     const hoverTarget = useCanvasStore((s) => s.hoverTarget);
@@ -152,21 +173,42 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         if (e.button !== 0) return;
         e.stopPropagation();
 
-        selectNode(node.id, e.shiftKey);
-        setIsDragging(true);
-        setCanvasDragging(true);
+        if (e.shiftKey) {
+            selectNode(node.id, true);
+            return;
+        }
+        const graph = useGraphStore.getState();
+        if (!graph.selectedNodeIds.has(node.id)) selectNode(node.id);
         dragStart.current = { x: e.clientX, y: e.clientY };
-        nodeStart.current = { ...node.position };
-        beginGesture();
+        const dragIds = graph.selectedNodeIds.has(node.id)
+            ? graph.selectedNodeIds
+            : new Set([node.id]);
+        nodeStarts.current = new Map(
+            Array.from(dragIds).flatMap((id) => {
+                const selectedNode = graph.nodes.get(id);
+                return selectedNode ? [[id, { ...selectedNode.position }] as const] : [];
+            }),
+        );
+        let gestureStarted = false;
 
         const handleMouseMove = (e: MouseEvent) => {
-            const dx = (e.clientX - dragStart.current.x) / zoom;
-            const dy = (e.clientY - dragStart.current.y) / zoom;
-
-            updateNodePosition(node.id, {
-                x: nodeStart.current.x + dx,
-                y: nodeStart.current.y + dy
-            });
+            const screenDx = e.clientX - dragStart.current.x;
+            const screenDy = e.clientY - dragStart.current.y;
+            if (!gestureStarted && Math.hypot(screenDx, screenDy) < 4) return;
+            if (!gestureStarted) {
+                gestureStarted = true;
+                setIsDragging(true);
+                setCanvasDragging(true);
+                beginGesture();
+            }
+            const positions = new Map<string, Position>();
+            for (const [id, start] of nodeStarts.current) {
+                positions.set(id, {
+                    x: start.x + screenDx / zoom,
+                    y: start.y + screenDy / zoom,
+                });
+            }
+            moveNodes(positions);
         };
 
         const cleanup = () => {
@@ -175,10 +217,14 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
             dragCleanupRef.current = null;
-            endGesture();
+            window.removeEventListener('blur', cleanup);
+            if (gestureStarted) endGesture();
         };
 
         const handleMouseUp = () => {
+            if (!gestureStarted && useGraphStore.getState().selectedNodeIds.size > 1) {
+                selectNode(node.id);
+            }
             cleanup();
         };
 
@@ -187,163 +233,47 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
-    }, [beginGesture, endGesture, node.id, node.position, zoom, selectNode, setCanvasDragging, updateNodePosition]);
+        window.addEventListener('blur', cleanup);
+    }, [beginGesture, endGesture, moveNodes, node.id, zoom, selectNode, setCanvasDragging]);
 
-    // Handle port mouse down - start connection dragging (with pending disconnect)
+    /*
+     * The port handlers are now two lines of EVENT PLUMBING over the shared
+     * connection verbs (`./connectionVerbs`). The bodies moved out because the
+     * keyboard route needed them and the only way to reach a closure is to
+     * impersonate a mouse — which is what U8 shipped and what the gate review
+     * correctly asked to be replaced by the verb itself.
+     *
+     * POINTER-AGNOSTIC (UI-017): a panel port activated with Enter/Space hands us
+     * a KeyboardEvent cast to this signature, which carries no `button`. The old
+     * `e.button !== 0` guard rejected exactly that, so every advertised keyboard
+     * port activation in the app silently did nothing. Guard against a
+     * non-primary MOUSE button, not against the absence of one.
+     */
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {
-        if (e.button !== 0) return; // Only left click
+        if (e.button != null && e.button !== 0) return;
         e.stopPropagation();
+        beginConnectionFrom(node, portId);
+    }, [node]);
 
-        // If not already connecting, start a new connection
-        const currentIsConnecting = useCanvasStore.getState().isConnecting;
-        if (!currentIsConnecting) {
-            // Check if this port has an existing connection - if so, store it for pending disconnect
-            const currentConnections = useGraphStore.getState().connections;
-            const port = node.ports.find(p => p.id === portId);
-            let pendingDisconnectId: string | undefined;
-
-            if (port) {
-                // Find existing connection on this port
-                const existingConnection = Array.from(currentConnections.values()).find(conn => {
-                    if (port.direction === 'output') {
-                        return conn.sourceNodeId === node.id && conn.sourcePortId === portId;
-                    } else {
-                        return conn.targetNodeId === node.id && conn.targetPortId === portId;
-                    }
-                });
-
-                if (existingConnection) {
-                    // Store for pending disconnect (will be removed when new connection confirmed)
-                    pendingDisconnectId = existingConnection.id;
-                }
-            }
-
-            // Start new connection from this port (with optional pending disconnect)
-            startConnecting(node.id, portId, pendingDisconnectId);
-        }
-    }, [node.id, node.ports, startConnecting]);
-
-    // Handle port mouse up - complete connection if dragging to a different port
+    // Handle port mouse up - complete the connection through the shared verb.
+    // The pointer route announces the outcome for the same reason the keyboard
+    // one does: a drop that silently does nothing is indistinguishable from a
+    // broken mouse (HA-07), and a cable that MOVES without a word breaks the
+    // model the cables teach (UX-INV Q5's other half).
     const handlePortMouseUp = useCallback((portId: string, e: React.MouseEvent) => {
         e.stopPropagation();
-
-        // Read current connecting state directly from store to avoid stale closure
-        const currentIsConnecting = useCanvasStore.getState().isConnecting;
-        const currentConnectingFrom = useCanvasStore.getState().connectingFrom;
-
-        if (currentIsConnecting && currentConnectingFrom) {
-            const sources = Array.isArray(currentConnectingFrom) ? currentConnectingFrom : [currentConnectingFrom];
-
-            // If releasing on the same port we started from, do nothing (allow click-to-connect)
-            if (sources.length === 1 && sources[0].nodeId === node.id && sources[0].portId === portId) {
-                // Don't stop connecting - user clicked a port to start, they'll click another to finish
-                return;
-            }
-
-            const updateNodePorts = useGraphStore.getState().updateNodePorts;
-            const isInstrument = ['piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds', 'sampler'].includes(node.type);
-
-            // Check if clicking on a ghost port (not yet persisted)
-            const isGhostPort = portId.startsWith('ghost-input-');
-            let actualFirstPortId = portId;
-
-            if (isGhostPort && isInstrument) {
-                // Extract the ghost port index
-                const ghostIndex = parseInt(portId.replace('ghost-input-', ''), 10);
-                const currentInputs = node.ports.filter(p => p.direction === 'input' && p.type === 'control');
-
-                // Create all needed ports up to and including the ghost port index
-                const newPorts = [...node.ports];
-                const portsToAdd = (ghostIndex + 1) - currentInputs.length;
-
-                const newPortIds: string[] = [];
-                for (let i = 0; i < portsToAdd; i++) {
-                    const nextIndex = currentInputs.length + i + 1;
-                    const newPortId = generateUniqueId('input-');
-                    newPortIds.push(newPortId);
-                    newPorts.push({
-                        id: newPortId,
-                        name: `In ${nextIndex}`,
-                        type: 'control',
-                        direction: 'input'
-                    });
-                }
-
-                // Persist the new ports
-                updateNodePorts(node.id, newPorts);
-
-                // The clicked ghost port is now the last one we added
-                actualFirstPortId = newPortIds[newPortIds.length - 1];
-            }
-
-            // Get target port (now that ghost ports are persisted if needed)
-            const updatedNode = useGraphStore.getState().nodes.get(node.id) || node;
-            const targetPort = isGhostPort
-                ? updatedNode.ports.find(p => p.id === actualFirstPortId)
-                : updatedNode.ports.find(p => p.id === portId);
-
-            if (!targetPort) return;
-
-            // Check if we need to auto-expand for multiple connections
-            if (isInstrument && targetPort.direction === 'input' && sources.length > 1) {
-                const currentInputs = updatedNode.ports.filter(p => p.direction === 'input' && p.type === 'control');
-                const clickedIndex = currentInputs.findIndex(p => p.id === actualFirstPortId);
-
-                if (clickedIndex === -1) return;
-
-                const neededCount = clickedIndex + sources.length;
-                const availableCount = currentInputs.length;
-
-                if (neededCount > availableCount) {
-                    const newPorts = [...updatedNode.ports];
-                    const portsToAdd = neededCount - availableCount;
-
-                    for (let i = 0; i < portsToAdd; i++) {
-                        const nextIndex = availableCount + i + 1;
-                        newPorts.push({
-                            id: generateUniqueId('input-'),
-                            name: `In ${nextIndex}`,
-                            type: 'control',
-                            direction: 'input'
-                        });
-                    }
-
-                    updateNodePorts(node.id, newPorts);
-                }
-            }
-
-            // Get final updated node and inputs after all port additions
-            const finalNode = useGraphStore.getState().nodes.get(node.id) || updatedNode;
-            const finalInputs = finalNode.ports.filter(p => p.direction === 'input' && p.type === 'control');
-
-            sources.forEach((source, index) => {
-                let actualTargetPortId = actualFirstPortId;
-
-                if (index > 0 && targetPort.direction === 'input' && isInstrument) {
-                    const clickedIndex = finalInputs.findIndex(p => p.id === actualFirstPortId);
-                    if (clickedIndex !== -1 && (clickedIndex + index) < finalInputs.length) {
-                        actualTargetPortId = finalInputs[clickedIndex + index].id;
-                    } else {
-                        return;
-                    }
-                }
-
-                if (targetPort.direction === 'input') {
-                    addConnection(source.nodeId, source.portId, node.id, actualTargetPortId);
-                } else {
-                    addConnection(node.id, actualTargetPortId, source.nodeId, source.portId);
-                }
-            });
-
-            // Remove pending disconnect connection now that new connection is confirmed
-            const pendingDisconnect = useCanvasStore.getState().pendingDisconnect;
-            if (pendingDisconnect) {
-                useGraphStore.getState().removeConnection(pendingDisconnect);
-            }
-
-            stopConnecting();
+        if (!useCanvasStore.getState().isConnecting) return;
+        const result = completeConnectionAt(node, portId);
+        if (result.ok) {
+            announce(result.announcement ?? '');
+            return;
         }
-    }, [node, addConnection, stopConnecting]);
+        // The button is already up, so this gesture is over either way — drop the
+        // cable rather than leaving one following a cursor nobody is pressing.
+        // (The keyboard route deliberately keeps it: nothing was released.)
+        useCanvasStore.getState().stopConnecting();
+        announce(result.reason);
+    }, [node]);
 
     // Handle port hover for connection targeting and 'A' key selection
     const handlePortMouseEnter = useCallback((portId: string) => {
@@ -396,56 +326,59 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     // For schematic nodes, render the component directly without wrapper
     if (isSchematic) {
+        const nodeRoot = (child: ReactNode) => (
+            <div data-canvas-node-root={node.id} style={{ display: 'contents' }}>{child}</div>
+        );
         switch (node.type) {
             case 'keyboard':
-                return <KeyboardNode {...schematicProps} />;
+                return nodeRoot(<KeyboardNode {...schematicProps} />);
             case 'keyboard-visual':
-                return <KeyboardVisualNode {...schematicProps} />;
+                return nodeRoot(<KeyboardVisualNode {...schematicProps} />);
             case 'instrument-visual':
-                return <InstrumentVisualNode {...schematicProps} />;
+                return nodeRoot(<InstrumentVisualNode {...schematicProps} />);
             case 'midi':
-                return <MIDINode {...schematicProps} />;
+                return nodeRoot(<MIDINode {...schematicProps} />);
             case 'midi-visual':
-                return <MIDIVisualNode {...schematicProps} />;
+                return nodeRoot(<MIDIVisualNode {...schematicProps} />);
             case 'minilab-3':
-                return <MiniLab3Node {...schematicProps} />;
+                return nodeRoot(<MiniLab3Node {...schematicProps} />);
             case 'minilab3-visual':
-                return <MiniLab3VisualNode {...schematicProps} />;
-            case 'piano':
-            case 'cello':
-            case 'electricCello':
-            case 'violin':
-            case 'saxophone':
+                return nodeRoot(<MiniLab3VisualNode {...schematicProps} />);
+            // `instrument` is the GENERIC voice every preset rig installs, and it
+            // has always been in InstrumentNode's own category table — it was
+            // simply never dispatched here, so a rig's instrument rendered as an
+            // anonymous fallback card with no voice picker.
+            case 'instrument':
             case 'strings':
             case 'keys':
             case 'winds':
-                return <InstrumentNode {...schematicProps} />;
+                return nodeRoot(<InstrumentNode {...schematicProps} />);
             case 'speaker':
-                return <SpeakerNode {...schematicProps} />;
+                return nodeRoot(<SpeakerNode {...schematicProps} />);
             case 'looper':
-                return <LooperNode {...schematicProps} />;
+                return nodeRoot(<LooperNode {...schematicProps} />);
             case 'microphone':
-                return <MicrophoneNode {...schematicProps} />;
+                return nodeRoot(<MicrophoneNode {...schematicProps} />);
             case 'canvas-input':
             case 'canvas-output':
-                return <CanvasIONode {...schematicProps} />;
+                return nodeRoot(<CanvasIONode {...schematicProps} />);
             case 'output-panel':
-                return <OutputPanelNode {...schematicProps} />;
+                return nodeRoot(<OutputPanelNode {...schematicProps} />);
             case 'input-panel':
-                return <InputPanelNode {...schematicProps} />;
+                return nodeRoot(<InputPanelNode {...schematicProps} />);
             case 'container':
-                return <ContainerNode {...schematicProps} />;
+                return nodeRoot(<ContainerNode {...schematicProps} />);
             case 'add':
             case 'subtract':
-                return <MathNode {...schematicProps} />;
+                return nodeRoot(<MathNode {...schematicProps} />);
             case 'library':
-                return <LibraryNode {...schematicProps} />;
+                return nodeRoot(<LibraryNode {...schematicProps} />);
             case 'sampler':
-                return <SamplerNode {...schematicProps} />;
+                return nodeRoot(<SamplerNode {...schematicProps} />);
             case 'sampler-visual':
-                return <SamplerVisualNode {...schematicProps} />;
+                return nodeRoot(<SamplerVisualNode {...schematicProps} />);
             case 'song':
-                return <SongNode {...schematicProps} />;
+                return nodeRoot(<SongNode {...schematicProps} />);
         }
     }
 
@@ -538,6 +471,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                     label={port.name}
                     className="is-disabled"
                     title={port.disabledReason}
+                    // The REASON is the socket's whole accessible name here.
+                    // Overriding only `title` left assistive tech reading an
+                    // inert port as "…drag to connect, or press Enter" — an
+                    // instruction it will not obey. Latent (no built-in ships a
+                    // gated port today) but the affordance is kept on purpose.
+                    aria-label={port.disabledReason ?? `${port.name} — not wired yet`}
                     aria-disabled={true}
                     data-node-id={node.id}
                     data-port-id={port.id}
@@ -575,6 +514,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     return (
         <NodeFrame
+            data-canvas-node-root={node.id}
             position={node.position}
             dragging={isDragging}
             className={`node ${node.type}${bypassed ? ' is-bypassed' : ''}${(node.data as Record<string, unknown>).pluginFaultKind === 'AutoBypassed' ? ' is-watchdog-bypassed' : ''}${pluginWindowOpen ? ' is-window-open' : ''}`}

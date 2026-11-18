@@ -1,7 +1,0 @@
-/* LatencyWarningBanner is inline. Its parent transport cluster owns placement. */
-
-.latency-warning-banner {
-    width: 100%;
-}
-
-.latency-warning-banner__actions { display: flex; gap: var(--space-xs); margin-top: var(--space-xs); }

@@ -17,6 +17,8 @@ use core::f32::consts::PI;
 
 pub mod guards;
 
+use guards::flush_denormal;
+
 // ===========================================================================
 // Biquad (RBJ Audio EQ Cookbook), transposed Direct Form II
 // ===========================================================================
@@ -174,8 +176,14 @@ impl Biquad {
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.c.b0 * x + self.z1;
-        self.z1 = self.c.b1 * x - self.c.a1 * y + self.z2;
-        self.z2 = self.c.b2 * x - self.c.a2 * y;
+        // Denormal floor on the RECIRCULATING state words. With the input at
+        // silence the `a1`/`a2` recursion decays multiplicatively and would park
+        // in the subnormal band forever (a CPU-spike hazard, and — before this —
+        // a permanent false `NonFinite` fault card once `sanitize` flushed it at
+        // the node boundary). `flush_denormal` deliberately lets NaN/Inf pass so
+        // a genuine fault still reaches that boundary and IS reported.
+        self.z1 = flush_denormal(self.c.b1 * x - self.c.a1 * y + self.z2);
+        self.z2 = flush_denormal(self.c.b2 * x - self.c.a2 * y);
         y
     }
 }
@@ -264,7 +272,11 @@ impl DelayLine {
         let read = (self.write + n - d) % n;
         let delayed = self.buf[read];
         let out = x * (1.0 - self.wet) + delayed * self.wet;
-        self.buf[self.write] = x + delayed * self.feedback;
+        // Denormal floor on the feedback WRITE: the recirculating tail decays by
+        // `feedback` per lap, so at (say) 0.34 feedback it reaches the subnormal
+        // band ~18s after the last note and then recirculates there forever.
+        // NaN/Inf are deliberately left intact so real garbage still faults.
+        self.buf[self.write] = flush_denormal(x + delayed * self.feedback);
         self.write = (self.write + 1) % n;
         out
     }
@@ -403,7 +415,10 @@ impl OnePole {
 
     #[inline]
     pub fn tick(&mut self) -> f32 {
-        self.current = self.target + (self.current - self.target) * self.coeff;
+        // Denormal floor: smoothing toward a 0.0 target is a multiplicative
+        // decay, so `current` would otherwise settle in the subnormal band and
+        // stay there for the life of the node.
+        self.current = flush_denormal(self.target + (self.current - self.target) * self.coeff);
         self.current
     }
 
@@ -526,8 +541,10 @@ impl KarplusString {
         };
         let nxt = self.buf[next];
         let out = cur;
-        // averaging lowpass with feedback damping
-        self.buf[self.idx] = 0.5 * (cur + nxt) * self.damp;
+        // averaging lowpass with feedback damping; floored so the ring-down does
+        // not park the whole delay line in the subnormal band once the string
+        // has decayed below audibility.
+        self.buf[self.idx] = flush_denormal(0.5 * (cur + nxt) * self.damp);
         self.idx = next;
         out
     }
@@ -542,6 +559,63 @@ mod tests {
     use super::*;
 
     const SR: f32 = 48_000.0;
+
+    /// The floor's actual job, measured where it actually matters: INSIDE the
+    /// delay line.
+    ///
+    /// `ojcore`'s `denormal_tail` test proves the engine stops *reporting* the
+    /// tail, but it can only inspect the master buffer — which `sanitize` has
+    /// already flushed by the time anyone looks. Nothing there proves the
+    /// recirculating state itself stays out of the subnormal band, which is the
+    /// one thing `flush_denormal` exists for. This does: one impulse, the jam
+    /// rig's 0.34 feedback, and 70 laps — well past the ~64 laps it takes 1.0 to
+    /// decay to 1e-30 — then every word of the buffer is checked.
+    #[test]
+    fn delay_feedback_state_never_parks_in_the_subnormal_band() {
+        let delay_samples = 64;
+        let mut d = DelayLine::new(256);
+        d.set(0.34, 1.0);
+
+        // One impulse, then silence for 70 laps of the line.
+        d.process(1.0, delay_samples);
+        for _ in 0..(delay_samples * 70) {
+            d.process(0.0, delay_samples);
+        }
+
+        let offenders: Vec<f32> = d
+            .buf
+            .iter()
+            .copied()
+            .filter(|s| *s != 0.0 && libm::fabsf(*s) < guards::DENORMAL_FLOOR)
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "delay feedback state parked in the subnormal band: {offenders:?}"
+        );
+        // And the tail really did decay — otherwise the test above is trivially
+        // satisfied by a line that never got quiet.
+        assert!(
+            d.buf.iter().all(|s| libm::fabsf(*s) < 1.0e-20),
+            "the tail should be long gone after 70 laps at 0.34 feedback"
+        );
+    }
+
+    /// The same property for the other kernel the sampler leans on: a one-pole
+    /// smoothing toward zero must land ON zero, not just near it.
+    #[test]
+    fn one_pole_settles_to_exact_zero_not_a_subnormal() {
+        let mut p = OnePole::new(1.0);
+        p.set_time(0.001, SR);
+        p.set_target(0.0);
+        for _ in 0..SR as usize {
+            p.tick();
+        }
+        assert_eq!(
+            p.value(),
+            0.0,
+            "a one-pole decaying to a zero target must reach a hard zero"
+        );
+    }
 
     fn approx(a: f32, b: f32, eps: f32) -> bool {
         (a - b).abs() <= eps

@@ -521,8 +521,13 @@ export class OjcoreNativeExecutor implements Executor {
             for (const { node, blob } of states) {
                 const visualId = this.reverseIndex.get(node);
                 if (visualId !== undefined && Array.isArray(blob) && blob.length > 0) {
-                    // Off-undo (outside any gesture): engine-derived state, not a user edit.
-                    store.updateNodeData(visualId, { [HOSTED_PLUGIN_STATE_KEY]: blob });
+                    // Off-undo via `{ record: false }`: engine-derived state, not a
+                    // user edit. Being outside a gesture does NOT keep a write out
+                    // of history — `graphStore`'s `set` wrapper records every graph
+                    // mutation that is not a replay — and this runs once per hosted
+                    // plugin on EVERY save, so without the opt-out a `Ctrl+S`
+                    // silently buried the player's last edit under undo entries.
+                    store.updateNodeData(visualId, { [HOSTED_PLUGIN_STATE_KEY]: blob }, { record: false });
                 }
             }
         } catch (err) {

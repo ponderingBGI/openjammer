@@ -174,9 +174,6 @@ const NODE_TYPE_NAMES: Record<string, string> = {
     'keyboard': 'Keyboard',
     'minilab-3': 'MiniLab3',
     'midi': 'MIDI',
-    'piano': 'Piano',
-    'cello': 'Cello',
-    'violin': 'Violin',
     'container': 'Container'
 };
 

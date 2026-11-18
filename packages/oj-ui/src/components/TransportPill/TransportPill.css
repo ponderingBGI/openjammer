@@ -1,0 +1,403 @@
+/*
+ * TransportPill — New DNA (handoff `.floatbar`, spec §2.2).
+ *
+ * One floating pill, shared by every surface. 44px tall, fully round, sitting on
+ * the node surface with the overlay shadow so it reads as ABOVE the stage without
+ * ever becoming a panel. Zones are separated by hairlines, not gaps, so the row
+ * stays one object.
+ *
+ * Placement is the host's: this component is inline-flex and knows nothing about
+ * where it floats.
+ */
+
+.oj-transport {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: 44px;
+    padding: 6px 14px 6px 6px;
+    gap: 10px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-overlay);
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.oj-transport__zone {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+}
+
+/* Hairline dividers BETWEEN zones — never before the first one. */
+.oj-transport__zone + .oj-transport__zone {
+    padding-left: 10px;
+    border-left: 1px solid var(--border-subtle);
+}
+
+/* ── Play / Stop ─────────────────────────────────────────────────────────── */
+
+.oj-transport__play {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+    cursor: pointer;
+    transition: transform var(--motion-spring), background-color var(--motion-fast);
+}
+
+.oj-transport__play:hover {
+    background: var(--accent-secondary);
+    transform: scale(1.08);
+}
+
+.oj-transport__play:active {
+    transform: scale(0.92);
+}
+
+.oj-transport__play:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* The play glyph is optically left-heavy; nudge it back onto the circle's centre. */
+.oj-transport__play:not(.is-playing) svg {
+    margin-left: 2px;
+}
+
+/*
+ * The attention pulse. It exists for ONE reason — the browser's autoplay policy
+ * has not been satisfied yet — so it is browser-only, pre-first-gesture only, and
+ * never while rolling.
+ *
+ * DEVIATION from the handoff (`scale(1) -> scale(1.09)` on the button itself):
+ * the pulse rides an expanding RING behind a button whose box never moves. A hit
+ * target that oscillates is measurably harder to hit — for a hand reaching for it
+ * on a stage, and for anything driving the app — and "nothing animating slowly
+ * enough to delay an action" is a rule this product keeps. The read is the same
+ * size, rhythm and colour; only the thing that grows changed.
+ *
+ * Under reduced motion it becomes a static accent ring: the meaning survives, the
+ * movement does not.
+ */
+.oj-transport__play.is-attn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent-primary);
+    animation: oj-transport-attn 1.6s ease-out infinite;
+    pointer-events: none;
+}
+
+@keyframes oj-transport-attn {
+    0% { transform: scale(1); opacity: 0.55; }
+    70%, 100% { transform: scale(1.55); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-transport__play.is-attn::after {
+        animation: none;
+        transform: scale(1.24);
+        opacity: 0.55;
+    }
+}
+
+/* ── Record ──────────────────────────────────────────────────────────────── */
+
+.oj-transport__record {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    transition: transform var(--motion-spring), background-color var(--motion-fast);
+}
+
+.oj-transport__record-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent-danger);
+    background: transparent;
+    transition: background-color var(--motion-fast);
+}
+
+.oj-transport__record:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+}
+
+.oj-transport__record:active:not(:disabled) {
+    transform: scale(0.92);
+}
+
+.oj-transport__record:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.oj-transport__record:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+/* Armed, but the playhead is outside the punch range — armed, not arming. */
+.oj-transport__record.is-outside-punch {
+    opacity: 0.48;
+}
+
+.oj-transport__record.is-recording .oj-transport__record-dot {
+    background: var(--accent-danger);
+    animation: oj-transport-rec 1200ms ease-in-out infinite;
+}
+
+@keyframes oj-transport-rec {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* Recording must stay legible when motion is suppressed: hold it filled. */
+@media (prefers-reduced-motion: reduce) {
+    .oj-transport__record.is-recording .oj-transport__record-dot {
+        animation: none;
+        opacity: 1;
+    }
+}
+
+/* ── Generic 28px icon buttons (return / loop / click) ───────────────────── */
+
+.oj-transport__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color var(--motion-fast), color var(--motion-fast), transform var(--motion-spring);
+}
+
+.oj-transport__btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.oj-transport__btn:active {
+    transform: scale(0.92);
+}
+
+.oj-transport__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.oj-transport__btn.is-on {
+    background: var(--bg-tertiary);
+    color: var(--accent-ink);
+}
+
+.oj-transport__return {
+    width: 24px;
+}
+
+/* ── Position readout ────────────────────────────────────────────────────── */
+
+.oj-transport__position {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    min-width: 6ch;
+    text-align: center;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    cursor: text;
+    transition: color var(--motion-fast), background-color var(--motion-fast);
+}
+
+.oj-transport__position:hover {
+    background: var(--bg-tertiary);
+}
+
+.oj-transport__position:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* A command is in flight and the engine has not confirmed it. Say so. */
+.oj-transport__position.is-pending {
+    color: var(--text-muted);
+}
+
+.oj-transport__position-input,
+.oj-transport__tempo-input {
+    width: 7ch;
+    padding: 2px 6px;
+    font-size: var(--text-sm);
+    text-align: center;
+}
+
+.oj-transport__tempo-input {
+    width: 6ch;
+}
+
+/* ── Tempo scrubber ──────────────────────────────────────────────────────── */
+
+.oj-transport__tempo {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    cursor: ew-resize;
+    touch-action: none;
+    transition: background-color var(--motion-fast);
+}
+
+.oj-transport__tempo:hover {
+    background: var(--bg-tertiary);
+}
+
+.oj-transport__tempo:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.oj-transport__tempo.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.oj-transport__tempo.is-disabled:hover {
+    background: transparent;
+}
+
+.oj-transport__tempo-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.oj-transport__tempo-unit {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* ── Count-in popover ────────────────────────────────────────────────────── */
+
+.oj-transport__click-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.oj-transport__count-in {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--accent-ink);
+}
+
+.oj-transport__popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-overlay);
+    z-index: 1;
+}
+
+.oj-transport__popover-item {
+    padding: 6px 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--motion-fast);
+}
+
+.oj-transport__popover-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.oj-transport__popover-item.is-on {
+    background: var(--bg-tertiary);
+    color: var(--accent-ink);
+}
+
+.oj-transport__popover-item:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Signal ──────────────────────────────────────────────────────────────── */
+
+.oj-transport__hint {
+    font-size: 11px;
+}
+
+/*
+ * The transport fault's reason, for anything that is not an eye: the accessible
+ * description the play button's `aria-describedby` names. Not a live region —
+ * the owner decides where the ONE announcement goes, so this never doubles it.
+ */
+.oj-transport__fault-reason {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}

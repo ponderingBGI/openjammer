@@ -73,20 +73,39 @@ describe('AutoParamPanel', () => {
         expect(screen.getByText('No parameters')).toBeDefined();
     });
 
-    it('writes a slider change back through the real graph store', () => {
-        // Use the REAL store: add a node, render the panel over it, move a slider,
-        // and assert the store recorded the new value (the panel writes via
-        // useGraphStore.updateNodeData keyed by param name).
+    it('writes a control change back through the real graph store', () => {
+        // Use the REAL store: add a node, render the panel over it, move a
+        // control, and assert the store recorded the new value (the panel writes
+        // via useGraphStore.updateNodeData keyed by param name).
+        //
+        // A handful of parameters renders as KNOBS — a node with two controls is
+        // an instrument face, not a table — so the gesture here is the knob's
+        // keyboard step rather than a range input's change event.
         const id = useGraphStore.getState().addNode('effect', { x: 0, y: 0 }, null, { rate: 4 });
         const node = useGraphStore.getState().nodes.get(id)!;
 
         render(<AutoParamPanel node={node} manifest={manifest} />);
-        const sliders = screen.getAllByRole('slider');
-        fireEvent.change(sliders[0], { target: { value: '10' } });
+        const dials = screen.getAllByRole('slider');
+        fireEvent.keyDown(dials[0]!, { key: 'ArrowUp' });
 
         const updated = useGraphStore.getState().nodes.get(id)!;
-        expect((updated.data as Record<string, unknown>).rate).toBe(10);
+        expect((updated.data as Record<string, unknown>).rate).toBeGreaterThan(4);
 
         useGraphStore.getState().removeNode(id);
+    });
+
+    it('falls back to scannable rows when a plugin has more controls than a face', () => {
+        const many = Array.from({ length: 9 }, (_, index) => ({
+            id: index,
+            name: `p${index}`,
+            min: 0,
+            max: 1,
+            default: 0.5,
+        }));
+        const { container } = render(
+            <AutoParamPanel node={makeNode({})} manifest={{ ...manifest, params: many }} />,
+        );
+        expect(container.querySelector('.auto-param-panel__dials')).toBeNull();
+        expect(container.querySelectorAll('.oj-param-row')).toHaveLength(9);
     });
 });

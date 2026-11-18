@@ -107,6 +107,38 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         expect(res.ok).toBe(false);
     });
 
+    it('honestly reports a timeline edit queued behind a live gesture', () => {
+        const store = useArrangementStore.getState();
+        const trackId = store.arrangement!.tracks[0]!.id!;
+        store.beginGesture('Performer drag');
+        store.previewGesture({ kind: 'setTrackPan', trackId, pan: 0.4 });
+
+        const result = createArrangementPort().apply([{ kind: 'setTrackMute', trackId, mute: true }]);
+
+        expect(result).toMatchObject({ ok: true, queued: true, appliedAfterGesture: true });
+        expect(result.summary).toMatch(/will land when the performer.*gesture ends/i);
+        expect(store.arrangement!.tracks[0]!.mute).toBeUndefined();
+        store.commitGesture();
+        expect(useArrangementStore.getState().arrangement!.tracks[0]!.mute).toBe(true);
+        expect(createArrangementPort().describe()).toMatchObject({
+            lastQueuedEditResult: expect.objectContaining({ status: 'applied' }),
+        });
+    });
+
+    it('surfaces a queued rejection in transport and the next arrangement description', () => {
+        const store = useArrangementStore.getState();
+        const clipId = store.arrangement!.tracks[0]!.clips[0]!.id!;
+        store.beginGesture('Delete clip');
+        store.previewGesture({ kind: 'removeClip', clipId });
+        const result = createArrangementPort().apply([{ kind: 'setClipMute', clipId, mute: true }]);
+        expect(result.queued).toBe(true);
+        store.commitGesture();
+        expect(useArrangementStore.getState().transportError).toMatch(/rejected/i);
+        expect(createArrangementPort().describe()).toMatchObject({
+            lastQueuedEditResult: expect.objectContaining({ status: 'rejected' }),
+        });
+    });
+
     it('shared moveClips op matches the hand op and is one undo step', () => {
         const clip = useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!;
         const before = structuredClone(useArrangementStore.getState().arrangement!);
@@ -115,6 +147,29 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         expect(useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!.startTick).toBe(240);
         result.undo();
         expect(useArrangementStore.getState().arrangement).toEqual(before);
+    });
+
+    it('dispatches createClip as one undoable empty-MIDI document edit', () => {
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const trackId = before.tracks[0]!.id!;
+        const result = createArrangementPort().applyOps!([{ op: 'createClip', trackId, startTick: 9_600, lengthTick: 3_840, name: 'Drawn' }]);
+        expect(result.ok).toBe(true);
+        const next = useArrangementStore.getState().arrangement!;
+        const clip = next.tracks[0]!.clips.find((item) => item.startTick === 9_600)!;
+        expect(next.sources?.[clip.sourceId]).toMatchObject({ kind: 'midi', notes: [], lengthTick: 3_840 });
+        result.undo();
+        const undone = useArrangementStore.getState().arrangement!;
+        expect({ ...undone, idCounter: before.idCounter }).toEqual(before);
+    });
+
+    it('dispatches addMarker through the same reversible marker path as Ctrl+M', () => {
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const result = createArrangementPort().applyOps!([{ op: 'addMarker', atTick: 7_680, name: 'Drop' }]);
+        expect(result.ok).toBe(true);
+        expect(useArrangementStore.getState().arrangement!.locations).toContainEqual(expect.objectContaining({ name: 'Drop', kind: 'mark', startTick: 7_680 }));
+        result.undo();
+        const undone = useArrangementStore.getState().arrangement!;
+        expect({ ...undone, idCounter: before.idCounter }).toEqual(before);
     });
 
     it('BC-30..37 dispatches the public piano-note ops through the shared lowering layer', () => {

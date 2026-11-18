@@ -1,4 +1,5 @@
 import React from 'react';
+import { Callout, type CalloutVariant } from '@openjammer/oj-ui';
 import './Guide.css';
 
 export type InfoBoxType = 'info' | 'success' | 'warning' | 'error' | 'tip';
@@ -9,14 +10,22 @@ interface GuideInfoBoxProps {
   children: React.ReactNode;
 }
 
+/** The guide's own vocabulary mapped onto the app's one message component. */
+const VARIANT: Record<InfoBoxType, CalloutVariant> = {
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  error: 'danger',
+  tip: 'tip',
+};
+
 /**
- * GuideInfoBox - Styled info/warning/tip boxes for guides
+ * GuideInfoBox — a message inside a guide.
  *
- * Features:
- * - Multiple types: info, success, warning, error, tip
- * - Icon with matching color
- * - Optional title
- * - Flexible content
+ * This is now a thin adapter over the oj-ui {@link Callout}: same surface, same
+ * hairline, same tinted-title-only rule as every other message in the app. It
+ * used to draw five bespoke tinted cards in literal hex, which meant a guide's
+ * warning looked nothing like a warning anywhere else in OpenJammer.
  */
 export function GuideInfoBox({
   type,
@@ -24,15 +33,9 @@ export function GuideInfoBox({
   children,
 }: GuideInfoBoxProps) {
   return (
-    <div className={`guide-info-box ${type}`}>
-      <div className="guide-info-icon">
-        <InfoIcon type={type} />
-      </div>
-      <div className="guide-info-content">
-        {title && <h5 className="guide-info-title">{title}</h5>}
-        <div className="guide-info-text">{children}</div>
-      </div>
-    </div>
+    <Callout variant={VARIANT[type]} title={title} icon={<InfoIcon type={type} />}>
+      {children}
+    </Callout>
   );
 }
 

@@ -12,6 +12,7 @@
  */
 
 import type { PortDefinition } from '../../engine/types';
+import { isBlackKey, noteLabel } from './noteNames';
 
 // ============================================================================
 // Control Type Definitions
@@ -188,8 +189,6 @@ export function generateKeyControls(
     channel: number = 0
 ): KeyControl[] {
     const controls: KeyControl[] = [];
-    const isBlackKey = (note: number) => [1, 3, 6, 8, 10].includes(note % 12);
-
     for (let note = startNote; note <= endNote; note++) {
         controls.push({
             id: `key-${note}`,
@@ -197,44 +196,11 @@ export function generateKeyControls(
             note,
             channel,
             isBlack: isBlackKey(note),
-            label: getNoteLabel(note)
+            label: noteLabel(note)
         });
     }
 
     return controls;
-}
-
-/**
- * Generate numbered controls (knobs, faders, pads)
- */
-export function generateNumberedControls<T extends 'knob' | 'fader' | 'pad'>(
-    type: T,
-    count: number,
-    ccOrNotes: number[],
-    channel: number = 0
-): MIDIControl[] {
-    return ccOrNotes.slice(0, count).map((ccOrNote, index) => {
-        const base = {
-            id: `${type}-${index + 1}`,
-            type,
-            label: `${index + 1}`,
-            channel
-        };
-
-        if (type === 'pad') {
-            return { ...base, note: ccOrNote } as PadControl;
-        } else {
-            return { ...base, cc: ccOrNote } as KnobControl | FaderControl;
-        }
-    });
-}
-
-// Note name helper
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-function getNoteLabel(note: number): string {
-    const octave = Math.floor(note / 12) - 1;
-    const noteName = NOTE_NAMES[note % 12];
-    return `${noteName}${octave}`;
 }
 
 // ============================================================================

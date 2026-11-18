@@ -7,15 +7,15 @@ export interface WaveformViewProps extends Omit<HTMLAttributes<HTMLDivElement>, 
     peaks: number[];
     /** Exact clip length, drawn in `--font-mono` (the Mono-Means-Exact Rule). */
     durationLabel: string;
-    /** The clip's display name — Caveat, truncated to a single line. */
+    /** The clip's display name — Outfit, truncated to a single line. */
     name: ReactNode;
-    /** Marks the clip as showing a cropped region (a small corner indicator). */
+    /** Marks the clip as showing a cropped region (an inset status badge). */
     cropped?: boolean;
-    /** Selected state — a hard accent ring (0 blur), no layout shift. */
+    /** Selected state — a crisp accent edge, no focus ring unless focus-visible. */
     selected?: boolean;
-    /** Being dragged — dims the card so the drag layer reads as the live copy. */
+    /** Being dragged — compresses the card and raises its overlay shadow. */
     dragging?: boolean;
-    /** Hovered as a valid drop target — a hard success ring (0 blur). */
+    /** Hovered as a valid drop target — a dashed accent edge. */
     dropTarget?: boolean;
     /** Whether the card is HTML5-draggable (native drag for library drops). */
     draggable?: boolean;
@@ -23,9 +23,8 @@ export interface WaveformViewProps extends Omit<HTMLAttributes<HTMLDivElement>, 
 
 /**
  * A clip preview card. Composes `Waveform` for the trace, with the clip name in
- * Caveat (truncating) and the exact `durationLabel` in mono. `selected` and
- * `dropTarget` apply hard accent/success rings with zero blur (Hard-Shadow
- * Rule); nothing reflows on state change (No-Surprise Rule). Presentational
+ * Outfit (truncating) and the exact `durationLabel` in mono. `selected` and
+ * `dropTarget` draw inset accent edges without changing box metrics. Presentational
  * only — drag/select/edit logic stays in the app and arrives via callbacks.
  * Replaces the AudioClipVisual presentation.
  */
@@ -63,7 +62,7 @@ export function WaveformView({
                 />
                 {cropped ? (
                     <span className="oj-waveform-view__crop" aria-label="Cropped region">
-                        ⟩⟨
+                        Cropped
                     </span>
                 ) : null}
                 <span className="oj-waveform-view__duration">{durationLabel}</span>

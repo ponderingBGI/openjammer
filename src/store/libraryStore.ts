@@ -177,17 +177,6 @@ export function getTagColor(tagName: string): string {
   return `hsl(${hue}, 60%, 70%)`;
 }
 
-export function getTagColorDark(tagName: string): string {
-  // Hash string to number
-  let hash = 0;
-  for (let i = 0; i < tagName.length; i++) {
-    hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Convert to hue (0-360)
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 50%, 25%)`;
-}
-
 // ============================================================================
 // Store Interface
 // ============================================================================
@@ -236,6 +225,14 @@ interface LibraryStore {
   computeAllTags: () => void;
 
   // Actions - Missing Files
+  /**
+   * Walk the library's items against the real folder and mark the ones that are
+   * no longer on disk `status: 'missing'`. Returns their ids.
+   *
+   * NOT recorded in history: it is a fact about the machine, not an edit the
+   * player made, and `libraryVerbs`' whole design note is that a directory scan
+   * must never push an undo entry.
+   */
   checkMissingItems: (libraryId: string) => Promise<string[]>;
   relinkItem: (itemId: string, newHandle: FileSystemFileHandle) => Promise<void>;
   relinkLibrary: (libraryId: string, newRootHandle: FileSystemDirectoryHandle) => Promise<void>;
@@ -804,6 +801,11 @@ export const useLibraryStore = create<LibraryStore>()(
       checkMissingItems: async (libraryId: string) => {
         const library = get().libraries[libraryId];
         if (!library) return [];
+        /* A library with no handle KEY was never linked to a folder in the
+           first place (`addLibrary` always writes one). That is malformed
+           state, not lost files, and striking through every row over it would
+           be the loudest possible way to say nothing true. */
+        if (!library.handleKey) return [];
 
         const handle = await restoreHandle(library.handleKey);
         if (!handle) {
@@ -821,6 +823,18 @@ export const useLibraryStore = create<LibraryStore>()(
 
           return missingItemIds;
         }
+
+        /* "I am not allowed to look right now" is NOT "the files are gone."
+           After a reload the directory handle survives in IndexedDB but its
+           permission does not always survive with it, and every
+           `getFileHandle` below then throws `NotAllowedError` — which the
+           `catch` would read as a missing file and strike through the player's
+           whole folder. A held note beats a glitch: report nothing rather than
+           report a loss that has not happened. `requestIfNeeded: false` because
+           this runs from an effect, and a permission prompt with no user
+           gesture behind it is either ignored by the browser or a modal the
+           player did not ask for. */
+        if (!(await verifyPermission(handle, false))) return [];
 
         const items = Object.values(get().items).filter(s => s.libraryId === libraryId);
         const BATCH_SIZE = 50;

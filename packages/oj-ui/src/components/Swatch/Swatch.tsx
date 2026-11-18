@@ -13,7 +13,7 @@ export interface SwatchProps
     node: string;
     /** The theme's display name, rendered below the preview. */
     name: ReactNode;
-    /** Whether this swatch is the currently chosen theme — gets a hard accent ring. */
+    /** Whether this swatch is the currently chosen theme — gets the shared focus ring. */
     selected?: boolean;
     /** Called when the swatch is activated (click / keyboard). */
     onSelect?: () => void;
@@ -21,8 +21,8 @@ export interface SwatchProps
 
 /**
  * A theme preview swatch. A small card showing the theme's `bg` color with an
- * inset `node`-color chip and the name below; the selected swatch gains a hard
- * `--accent-primary` ring (0-blur, per the Hard-Shadow Rule). Frame, border,
+ * inset `node`-color chip and the name below; the selected swatch gains an
+ * accent border and the shared focus ring. Frame, border,
  * radius and ring read the semantic tokens; only `bg`/`node` are theme data.
  */
 export function Swatch({

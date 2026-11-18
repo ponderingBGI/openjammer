@@ -1,0 +1,99 @@
+/*
+ * Knob — New DNA (handoff `.nj-knob`).
+ *
+ * A dial with weight: a radial-lit disc (`--bg-node` highlight falling to
+ * `--bg-tertiary`), one `--border-control` ring, the raised shadow, and a single
+ * accent tick that sweeps -135deg to +135deg. Everything scales off
+ * `--oj-knob-size`, so a 34px canvas knob and a 52px panel knob are the same
+ * object at two sizes.
+ *
+ * The tick NEVER transitions: it is a readout of the value, and a value that
+ * eases into place is a value that lies about where the parameter is.
+ */
+
+.oj-knob-wrap {
+    --oj-knob-size: var(--knob-size);
+    /* 3px at 52px; never thinner than a hairline you can actually see. */
+    --oj-knob-tick-w: max(2px, calc(var(--oj-knob-size) * 0.058));
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-sans);
+}
+
+.oj-knob {
+    position: relative;
+    box-sizing: border-box;
+    width: var(--oj-knob-size);
+    height: var(--oj-knob-size);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--bg-node), var(--bg-tertiary));
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-raised);
+    cursor: grab;
+    touch-action: none;
+    transition: box-shadow var(--motion-fast);
+}
+
+.oj-knob:hover {
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+/* One focus ring everywhere. */
+.oj-knob:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+.oj-knob.is-dragging {
+    cursor: grabbing;
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+/* The tick: the pointer that says where the value is. No transition, ever. */
+.oj-knob::after {
+    content: '';
+    position: absolute;
+    top: calc(var(--oj-knob-size) * 0.077);
+    left: calc(50% - var(--oj-knob-tick-w) / 2);
+    width: var(--oj-knob-tick-w);
+    height: calc(var(--oj-knob-size) * 0.288);
+    border-radius: 2px;
+    background: var(--accent-primary);
+    transform-origin: 50% calc(var(--oj-knob-size) * 0.423);
+    transform: rotate(var(--oj-knob-rot, 0deg));
+}
+
+/* Label + readout — micro mono, the exact-value voice. */
+.oj-knob__label,
+.oj-knob__value {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.oj-knob__label {
+    color: var(--text-muted);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+}
+
+.oj-knob__value {
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.oj-knob-wrap.is-disabled {
+    opacity: 0.45;
+}
+
+.oj-knob-wrap.is-disabled .oj-knob {
+    cursor: not-allowed;
+}
+
+.oj-knob-wrap.is-disabled .oj-knob:hover {
+    box-shadow: var(--shadow-raised);
+}
